@@ -92,6 +92,14 @@ button, input, select { font-family: inherit; font-size: inherit; color: inherit
   background: linear-gradient(135deg, var(--accent), #7c5cff);
   box-shadow: 0 0 10px var(--accent);
 }
+.tabs { display: flex; gap: 4px; background: var(--bg-input); padding: 4px; border-radius: 10px; }
+.tab-btn {
+  border: none; background: transparent; color: var(--text-muted);
+  padding: 7px 16px; border-radius: 7px; cursor: pointer;
+  font-weight: 600; font-size: 13px; transition: all .15s ease;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.is-active { background: var(--bg-card); color: var(--text); box-shadow: var(--shadow-card); }
 .header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
 .icon-btn {

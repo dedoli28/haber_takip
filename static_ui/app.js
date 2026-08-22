@@ -1,15 +1,8 @@
 "use strict";
 
 /* ===================== Ayarlar ===================== */
-const BATCH_SIZE = 12;
-const ES_ZAMANLI_ISTEK = 4;
-
-/* ===================== State ===================== */
-const state = {
-  haberler: [],
-  haberFiltre: "",
-  haberCalisiyor: false,
-};
+const BATCH_SIZE = 20;
+const ES_ZAMANLI_ISTEK = 2;
 
 const SINIF_SIRA = ["cok_onemli", "onemli", "bakmaya_deger", "onemsiz"];
 const SINIF_ETIKET = {
@@ -21,6 +14,8 @@ const SINIF_ETIKET = {
 
 /* ===================== Helpers ===================== */
 function $(id) { return document.getElementById(id); }
+
+function gecikme(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 function toast(mesaj, tur = "ok") {
   const el = document.createElement("div");
@@ -69,6 +64,18 @@ function temaUygula(tema) {
   $("themeIconSun").style.display = tema === "light" ? "block" : "none";
 }
 
+/* ===================== Sekmeler ===================== */
+function sekmeBaslat() {
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("is-active"));
+      document.querySelectorAll(".view").forEach((v) => v.classList.remove("is-active"));
+      btn.classList.add("is-active");
+      $(`view-${btn.dataset.tab}`).classList.add("is-active");
+    });
+  });
+}
+
 /* ===================== Ayarlar modal ===================== */
 function ayarlarBaslat() {
   $("openSettings").addEventListener("click", () => $("settingsOverlay").classList.add("is-open"));
@@ -89,6 +96,7 @@ function ayarlarBaslat() {
   });
 
   $("haberModel").addEventListener("change", () => modelKaydet($("haberModel").value));
+  $("blogModel").addEventListener("change", () => modelKaydet($("blogModel").value));
 }
 function sifreGosterGizle(inputId) {
   const el = $(inputId);
@@ -104,11 +112,31 @@ function durumYukle() {
     toast("Başlamak için Ayarlar'dan bir Gemini API anahtarı girmen gerekiyor.", "warn");
     $("settingsOverlay").classList.add("is-open");
   }
-  $("haberModel").value = modelAl();
+  const model = modelAl();
+  $("haberModel").value = model;
+  $("blogModel").value = model;
 }
 
-/* ===================== Kart oluşturma ===================== */
-function haberKartOlustur(h, index) {
+/* ===================== Detay modal (haber/blog ortak) ===================== */
+function detayGoster(h) {
+  $("detailBadge").textContent = SINIF_ETIKET[h.sinif] || h.sinif;
+  $("detailBadge").className = `badge badge-${h.sinif}`;
+  $("detailMeta").textContent = `${h.saat} · ${h.kaynak}`;
+  $("detailTitle").textContent = h.baslik;
+  $("detailSummary").textContent = h.ai_ozet || "Bu içerik için henüz bir özet yok.";
+  $("detailOpenLink").href = h.url;
+  $("detailOverlay").classList.add("is-open");
+}
+
+function detayModalBaslat() {
+  $("closeDetail").addEventListener("click", () => $("detailOverlay").classList.remove("is-open"));
+  $("detailOverlay").addEventListener("click", (e) => {
+    if (e.target === $("detailOverlay")) $("detailOverlay").classList.remove("is-open");
+  });
+}
+
+/* ===================== Ortak kart/liste yardımcıları ===================== */
+function kartOlustur(h, index, tiklaninca) {
   const kart = document.createElement("div");
   kart.className = `item-card c-${h.sinif}`;
   kart.style.animationDelay = `${Math.min(index * 25, 300)}ms`;
@@ -146,26 +174,8 @@ function haberKartOlustur(h, index) {
   }
 
   kart.appendChild(govde);
-  kart.addEventListener("click", () => haberDetayGoster(h));
+  kart.addEventListener("click", () => tiklaninca(h));
   return kart;
-}
-
-/* ===================== Detay modal ===================== */
-function haberDetayGoster(h) {
-  $("detailBadge").textContent = SINIF_ETIKET[h.sinif] || h.sinif;
-  $("detailBadge").className = `badge badge-${h.sinif}`;
-  $("detailMeta").textContent = `${h.saat} · ${h.kaynak}`;
-  $("detailTitle").textContent = h.baslik;
-  $("detailSummary").textContent = h.ai_ozet || "Bu haber için henüz bir özet yok.";
-  $("detailOpenLink").href = h.url;
-  $("detailOverlay").classList.add("is-open");
-}
-
-function detayModalBaslat() {
-  $("closeDetail").addEventListener("click", () => $("detailOverlay").classList.remove("is-open"));
-  $("detailOverlay").addEventListener("click", (e) => {
-    if (e.target === $("detailOverlay")) $("detailOverlay").classList.remove("is-open");
-  });
 }
 
 function bosDurumCiz(konteynerId, mesaj) {
@@ -187,189 +197,222 @@ function iskeletCiz(konteynerId, adet = 4) {
   }
 }
 
-/* ===================== Haberler render + filtre ===================== */
-function haberleriCiz() {
-  const kutu = $("haberListe");
-  kutu.innerHTML = "";
-  const gorulen = state.haberFiltre
-    ? state.haberler.filter((h) => h.sinif === state.haberFiltre)
-    : state.haberler;
+/* ===================== Panel (Haberler / Bloglar ortak mantığı) ===================== */
+function panelOlustur(cfg) {
+  // cfg: { tur, prefix, bosMesaj, varsayilanBosMesaj }
+  const state = { ogeler: [], filtre: "", calisiyor: false };
 
-  if (gorulen.length === 0) {
-    bosDurumCiz("haberListe", state.haberler.length ? "Seçilen filtreyle eşleşen haber yok." : 'Henüz haber yok.<br>"Haberleri Getir ve Sınıflandır" butonuna tıkla.');
-    return;
+  const el = {
+    model: $(`${cfg.prefix}Model`),
+    kategori: cfg.kategoriId ? $(cfg.kategoriId) : null,
+    gun: $(`${cfg.prefix}Gun`),
+    btn: $(`${cfg.prefix}Btn`),
+    kaydetBtn: $(`${cfg.prefix}KaydetBtn`),
+    durum: $(`${cfg.prefix}Durum`),
+    progress: $(`${cfg.prefix}Progress`),
+    chips: document.querySelectorAll(`#${cfg.prefix}Chips .chip`),
+    liste: `${cfg.prefix}Liste`,
+  };
+
+  function ciz() {
+    const kutu = $(el.liste);
+    kutu.innerHTML = "";
+    const gorulen = state.filtre ? state.ogeler.filter((h) => h.sinif === state.filtre) : state.ogeler;
+
+    if (gorulen.length === 0) {
+      bosDurumCiz(el.liste, state.ogeler.length ? "Seçilen filtreyle eşleşen içerik yok." : cfg.varsayilanBosMesaj);
+      return;
+    }
+    gorulen.forEach((h, i) => kutu.appendChild(kartOlustur(h, i, detayGoster)));
   }
-  gorulen.forEach((h, i) => kutu.appendChild(haberKartOlustur(h, i)));
-}
 
-function haberChipSayilariGuncelle() {
-  const sayilar = {};
-  state.haberler.forEach((h) => { sayilar[h.sinif] = (sayilar[h.sinif] || 0) + 1; });
-  document.querySelectorAll("#haberChips .chip").forEach((chip) => {
-    const sinif = chip.dataset.sinif;
-    if (!sinif) { chip.textContent = `Tümü (${state.haberler.length})`; return; }
-    chip.textContent = `${SINIF_ETIKET[sinif]} (${sayilar[sinif] || 0})`;
-  });
-}
-
-function haberChipBaslat() {
-  document.querySelectorAll("#haberChips .chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      state.haberFiltre = chip.dataset.sinif;
-      document.querySelectorAll("#haberChips .chip").forEach((c) => c.classList.remove("is-active"));
-      chip.classList.add("is-active");
-      haberleriCiz();
+  function chipSayilariGuncelle() {
+    const sayilar = {};
+    state.ogeler.forEach((h) => { sayilar[h.sinif] = (sayilar[h.sinif] || 0) + 1; });
+    el.chips.forEach((chip) => {
+      const sinif = chip.dataset.sinif;
+      if (!sinif) { chip.textContent = `Tümü (${state.ogeler.length})`; return; }
+      chip.textContent = `${SINIF_ETIKET[sinif]} (${sayilar[sinif] || 0})`;
     });
-  });
-}
-
-/* ===================== Haberleri getir + sınıflandır ===================== */
-async function haberleriGetir() {
-  if (state.haberCalisiyor) return;
-
-  const apiKey = anahtarAl();
-  if (!apiKey) {
-    toast("Önce Ayarlar'dan bir Gemini API anahtarı girin.", "warn");
-    $("settingsOverlay").classList.add("is-open");
-    return;
   }
 
-  state.haberCalisiyor = true;
-  state.haberler = [];
-  iskeletCiz("haberListe", 5);
-  $("haberKaydetBtn").disabled = true;
-  $("haberBtn").disabled = true;
-  $("haberBtn").textContent = "Çalışıyor...";
-  $("haberProgress").style.width = "0%";
-  $("haberDurum").textContent = "Finviz'den haberler çekiliyor...";
-  ustProgres(true);
+  function chipBaslat() {
+    el.chips.forEach((chip) => {
+      chip.addEventListener("click", () => {
+        state.filtre = chip.dataset.sinif;
+        el.chips.forEach((c) => c.classList.remove("is-active"));
+        chip.classList.add("is-active");
+        ciz();
+      });
+    });
+  }
 
-  const model = $("haberModel").value;
-  const gun = $("haberGun").value;
+  async function getir() {
+    if (state.calisiyor) return;
 
-  try {
-    const cekResp = await fetch(`/api/haberler?gun=${encodeURIComponent(gun)}`);
-    const cekSonuc = await cekResp.json();
-
-    if (!cekSonuc.ok) {
-      toast(cekSonuc.hata || "Haberler alınamadı.", "error");
-      $("haberDurum").textContent = "Hata oluştu.";
+    const apiKey = anahtarAl();
+    if (!apiKey) {
+      toast("Önce Ayarlar'dan bir Gemini API anahtarı girin.", "warn");
+      $("settingsOverlay").classList.add("is-open");
       return;
     }
 
-    const tumler = cekSonuc.haberler;
-    if (tumler.length === 0) {
-      $("haberDurum").textContent = `${cekSonuc.tarih} tarihine ait haber bulunamadı.`;
-      bosDurumCiz("haberListe", "Seçilen tarih için haber bulunamadı.");
-      return;
-    }
+    state.calisiyor = true;
+    state.ogeler = [];
+    iskeletCiz(el.liste, 5);
+    el.kaydetBtn.disabled = true;
+    el.btn.disabled = true;
+    const orijinalBtnMetni = el.btn.textContent.trim();
+    el.btn.textContent = "Çalışıyor...";
+    el.progress.style.width = "0%";
+    el.durum.textContent = "Finviz'den içerikler çekiliyor...";
+    ustProgres(true);
 
-    $("haberDurum").textContent = `${tumler.length} haber bulundu. Sınıflandırılıyor...`;
+    const model = el.model.value;
+    const gun = el.gun.value;
+    const kategori = el.kategori ? el.kategori.value : "ana";
 
-    const sonucMap = new Map(tumler.map((h) => [h.id, { ...h, sinif: "bakmaya_deger", ai_ozet: "" }]));
-    const gruplar = [];
-    for (let i = 0; i < tumler.length; i += BATCH_SIZE) gruplar.push(tumler.slice(i, i + BATCH_SIZE));
+    try {
+      const parametreler = new URLSearchParams({ gun, tur: cfg.tur, kategori });
+      const cekResp = await fetch(`/api/haberler?${parametreler.toString()}`);
+      const cekSonuc = await cekResp.json();
 
-    let tamamlanan = 0;
-    let ilkHata = null;
-    let siraNo = 0;
-
-    async function isci() {
-      while (siraNo < gruplar.length) {
-        const grup = gruplar[siraNo++];
-        try {
-          const resp = await fetch("/api/siniflandir", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              items: grup.map((h) => ({ id: h.id, saat: h.saat, baslik: h.baslik, kaynakOzeti: h.kaynakOzeti })),
-              apiKey,
-              model,
-            }),
-          });
-          const yanit = await resp.json();
-          if (yanit.ok) {
-            yanit.results.forEach((r) => {
-              const mevcut = sonucMap.get(r.id);
-              if (mevcut) { mevcut.sinif = r.sinif; mevcut.ai_ozet = r.ozet; }
-            });
-          } else if (!ilkHata) {
-            ilkHata = yanit.hata || "Sınıflandırma başarısız.";
-          }
-        } catch (e) {
-          if (!ilkHata) ilkHata = String(e);
-        }
-        tamamlanan += grup.length;
-        $("haberProgress").style.width = `${Math.round((tamamlanan / tumler.length) * 100)}%`;
-        $("haberDurum").textContent = `Sınıflandırılıyor... ${tamamlanan}/${tumler.length}`;
+      if (!cekSonuc.ok) {
+        toast(cekSonuc.hata || "İçerikler alınamadı.", "error");
+        el.durum.textContent = "Hata oluştu.";
+        return;
       }
+
+      const tumler = cekSonuc.haberler;
+      if (tumler.length === 0) {
+        el.durum.textContent = gun === "aktif" ? "Şu an gösterilecek içerik bulunamadı." : `${cekSonuc.tarih} tarihine ait içerik bulunamadı.`;
+        bosDurumCiz(el.liste, "Seçilen filtre için içerik bulunamadı.");
+        return;
+      }
+
+      el.durum.textContent = `${tumler.length} içerik bulundu. Sınıflandırılıyor...`;
+
+      const sonucMap = new Map(tumler.map((h) => [h.id, { ...h, sinif: "bakmaya_deger", ai_ozet: "" }]));
+      const gruplar = [];
+      for (let i = 0; i < tumler.length; i += BATCH_SIZE) gruplar.push(tumler.slice(i, i + BATCH_SIZE));
+
+      let tamamlanan = 0;
+      let ilkHata = null;
+      let siraNo = 0;
+
+      async function isci(isciIndex) {
+        await gecikme(isciIndex * 500);
+        while (siraNo < gruplar.length) {
+          const grup = gruplar[siraNo++];
+          try {
+            const resp = await fetch("/api/siniflandir", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                items: grup.map((h) => ({ id: h.id, saat: h.saat, baslik: h.baslik, kaynakOzeti: h.kaynakOzeti })),
+                apiKey,
+                model,
+              }),
+            });
+            const yanit = await resp.json();
+            if (yanit.ok) {
+              yanit.results.forEach((r) => {
+                const mevcut = sonucMap.get(r.id);
+                if (mevcut) { mevcut.sinif = r.sinif; mevcut.ai_ozet = r.ozet; }
+              });
+            } else if (!ilkHata) {
+              ilkHata = yanit.hata || "Sınıflandırma başarısız.";
+            }
+          } catch (e) {
+            if (!ilkHata) ilkHata = String(e);
+          }
+          tamamlanan += grup.length;
+          el.progress.style.width = `${Math.round((tamamlanan / tumler.length) * 100)}%`;
+          el.durum.textContent = `Sınıflandırılıyor... ${tamamlanan}/${tumler.length}`;
+          await gecikme(300);
+        }
+      }
+
+      const isciSayisi = Math.min(ES_ZAMANLI_ISTEK, gruplar.length);
+      await Promise.all(Array.from({ length: isciSayisi }, (_v, i) => isci(i)));
+
+      state.ogeler = Array.from(sonucMap.values());
+      chipSayilariGuncelle();
+      ciz();
+      el.kaydetBtn.disabled = false;
+
+      if (ilkHata) {
+        el.durum.textContent = "Tamamlandı (bazı gruplar başarısız oldu).";
+        toast(ilkHata, "warn");
+      } else {
+        el.durum.textContent = `Tamamlandı. Toplam ${tumler.length} içerik (${new Date().toLocaleTimeString("tr-TR")}).`;
+      }
+    } catch (e) {
+      toast("Beklenmeyen hata: " + e, "error");
+      el.durum.textContent = "Hata oluştu.";
+    } finally {
+      state.calisiyor = false;
+      el.btn.disabled = false;
+      el.btn.textContent = orijinalBtnMetni;
+      ustProgres(false);
     }
-
-    const isciSayisi = Math.min(ES_ZAMANLI_ISTEK, gruplar.length);
-    await Promise.all(Array.from({ length: isciSayisi }, () => isci()));
-
-    state.haberler = Array.from(sonucMap.values());
-    haberChipSayilariGuncelle();
-    haberleriCiz();
-    $("haberKaydetBtn").disabled = false;
-
-    if (ilkHata) {
-      $("haberDurum").textContent = `Tamamlandı (bazı gruplar başarısız oldu).`;
-      toast(ilkHata, "warn");
-    } else {
-      $("haberDurum").textContent = `Tamamlandı. Toplam ${tumler.length} haber (${new Date().toLocaleTimeString("tr-TR")}).`;
-    }
-  } catch (e) {
-    toast("Beklenmeyen hata: " + e, "error");
-    $("haberDurum").textContent = "Hata oluştu.";
-  } finally {
-    state.haberCalisiyor = false;
-    $("haberBtn").disabled = false;
-    $("haberBtn").textContent = "Haberleri Getir ve Sınıflandır";
-    ustProgres(false);
   }
-}
 
-/* ===================== Markdown indir ===================== */
-function haberleriIndir() {
-  if (state.haberler.length === 0) return;
+  function indir() {
+    if (state.ogeler.length === 0) return;
+    const bugun = new Date().toISOString().slice(0, 10);
+    const baslikMetni = cfg.tur === "blog" ? "Finviz Blog Yazıları" : "Finviz Borsa Haberleri";
+    const satirlar = [`# ${baslikMetni} - ${bugun}`, ""];
 
-  const bugun = new Date().toISOString().slice(0, 10);
-  const satirlar = [`# Finviz Borsa Haberleri - ${bugun}`, ""];
-
-  SINIF_SIRA.forEach((sinif) => {
-    const grup = state.haberler.filter((h) => h.sinif === sinif);
-    if (grup.length === 0) return;
-    satirlar.push(`## ${SINIF_ETIKET[sinif]} (${grup.length})`);
-    satirlar.push("");
-    grup.forEach((h) => {
-      const ozetStr = h.ai_ozet ? ` — _${h.ai_ozet}_` : "";
-      satirlar.push(`- **[${h.saat}] [${h.baslik}](${h.url})** (${h.kaynak})${ozetStr}`);
+    SINIF_SIRA.forEach((sinif) => {
+      const grup = state.ogeler.filter((h) => h.sinif === sinif);
+      if (grup.length === 0) return;
+      satirlar.push(`## ${SINIF_ETIKET[sinif]} (${grup.length})`);
+      satirlar.push("");
+      grup.forEach((h) => {
+        const ozetStr = h.ai_ozet ? ` — _${h.ai_ozet}_` : "";
+        satirlar.push(`- **[${h.saat}] [${h.baslik}](${h.url})** (${h.kaynak})${ozetStr}`);
+      });
+      satirlar.push("");
     });
-    satirlar.push("");
-  });
 
-  const blob = new Blob([satirlar.join("\n")], { type: "text/markdown;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `rapor_${bugun}.md`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  toast("Markdown dosyası indirildi.", "ok");
+    const blob = new Blob([satirlar.join("\n")], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${cfg.tur}_${bugun}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast("Markdown dosyası indirildi.", "ok");
+  }
+
+  chipBaslat();
+  el.btn.addEventListener("click", getir);
+  el.kaydetBtn.addEventListener("click", indir);
 }
 
 /* ===================== Başlat ===================== */
 function baslat() {
   temaBaslat();
+  sekmeBaslat();
   ayarlarBaslat();
   detayModalBaslat();
-  haberChipBaslat();
 
-  $("haberBtn").addEventListener("click", haberleriGetir);
-  $("haberKaydetBtn").addEventListener("click", haberleriIndir);
+  panelOlustur({
+    tur: "haber",
+    prefix: "haber",
+    kategoriId: "haberKategori",
+    varsayilanBosMesaj: 'Henüz haber yok.<br>"Haberleri Getir ve Sınıflandır" butonuna tıkla.',
+  });
+
+  panelOlustur({
+    tur: "blog",
+    prefix: "blog",
+    kategoriId: null,
+    varsayilanBosMesaj: 'Henüz blog yazısı yok.<br>"Blogları Getir ve Sınıflandır" butonuna tıkla.',
+  });
 
   durumYukle();
 }
