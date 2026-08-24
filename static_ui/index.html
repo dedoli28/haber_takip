@@ -69,10 +69,23 @@
           <svg class="btn-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18 3v4h-4M6 21v-4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Haberleri Getir ve Sınıflandır
         </button>
+        <button class="btn btn-primary" id="haberTumBtn">
+          <svg class="btn-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Tüm Kategorileri Getir ve Sınıflandır
+        </button>
         <button class="btn btn-outline" id="haberKaydetBtn" disabled>Markdown İndir</button>
         <button class="btn btn-outline" id="haberGunOzetBtn" disabled>Günü Özetle</button>
       </div>
-      <p class="hint">Not: "Finviz'deki Aktif Haberler" seçeneği tarihe göre filtrelemeden, Finviz'in o an sayfasında gösterdiği tüm haberleri getirir (bugün yeterince haber yoksa geçmişten de gelebilir). "Pazar Nabzı" kategorisindeki içerikler dış kaynaklı makaleler değil, Finviz'in kendi ürettiği kısa hisse güncellemeleridir — "Kaynağı Aç" ilgili hissenin Finviz sayfasına götürür.</p>
+      <p class="hint">Not: "Finviz'deki Aktif Haberler" seçeneği tarihe göre filtrelemeden, Finviz'in o an sayfasında gösterdiği tüm haberleri getirir (bugün yeterince haber yoksa geçmişten de gelebilir). "Pazar Nabzı" kategorisindeki içerikler dış kaynaklı makaleler değil, Finviz'in kendi ürettiği kısa hisse güncellemeleridir — "Kaynağı Aç" ilgili hissenin Finviz sayfasına götürür. "Tüm Kategorileri Getir ve Sınıflandır" yukarıdaki Kategori seçimini yok sayıp 5 kategoriyi de birden çekip tek listede birleştirir.</p>
+    </div>
+
+    <div class="control-panel">
+      <div class="control-row">
+        <div class="field" style="flex:1;">
+          <label>Ara</label>
+          <input type="text" id="haberArama" placeholder="Başlık veya özette ara...">
+        </div>
+      </div>
     </div>
 
     <div class="status-row">
@@ -86,6 +99,15 @@
       <button class="chip" data-sinif="onemli" style="--chip-c:#f59e0b">Önemli</button>
       <button class="chip" data-sinif="bakmaya_deger" style="--chip-c:#3b82f6">Bakmaya Değer</button>
       <button class="chip" data-sinif="onemsiz" style="--chip-c:#6b7280">Önemsiz</button>
+    </div>
+
+    <div class="chip-row" id="haberKategoriChips">
+      <button class="chip chip-all is-active" data-kategori="">Tüm Türler</button>
+      <button class="chip" data-kategori="ana" style="--chip-c:#8b5cf6">Piyasa</button>
+      <button class="chip" data-kategori="hisse" style="--chip-c:#8b5cf6">Hisse</button>
+      <button class="chip" data-kategori="etf" style="--chip-c:#8b5cf6">ETF</button>
+      <button class="chip" data-kategori="kripto" style="--chip-c:#8b5cf6">Kripto</button>
+      <button class="chip" data-kategori="pazar_nabzi" style="--chip-c:#8b5cf6">Pazar Nabzı</button>
     </div>
 
     <div class="card-list" id="haberListe">
@@ -128,6 +150,15 @@
       <p class="hint">Finviz'in "Blogs" sekmesindeki yazarlar/blog gönderileri.</p>
     </div>
 
+    <div class="control-panel">
+      <div class="control-row">
+        <div class="field" style="flex:1;">
+          <label>Ara</label>
+          <input type="text" id="blogArama" placeholder="Başlık veya özette ara...">
+        </div>
+      </div>
+    </div>
+
     <div class="status-row">
       <span class="status-text" id="blogDurum">Hazır.</span>
       <div class="progress-track"><div class="progress-fill" id="blogProgress"></div></div>
@@ -160,12 +191,31 @@
       </div>
     </div>
 
+    <div class="control-panel">
+      <div class="control-row">
+        <div class="field" style="flex:1;">
+          <label>Ara</label>
+          <input type="text" id="kayitliArama" placeholder="Başlık veya özette ara...">
+        </div>
+      </div>
+    </div>
+
     <div class="chip-row" id="kayitliChips">
       <button class="chip chip-all is-active" data-sinif="">Tümü</button>
       <button class="chip" data-sinif="cok_onemli" style="--chip-c:#ef4444">Çok Önemli</button>
       <button class="chip" data-sinif="onemli" style="--chip-c:#f59e0b">Önemli</button>
       <button class="chip" data-sinif="bakmaya_deger" style="--chip-c:#3b82f6">Bakmaya Değer</button>
       <button class="chip" data-sinif="onemsiz" style="--chip-c:#6b7280">Önemsiz</button>
+    </div>
+
+    <div class="chip-row" id="kayitliKategoriChips">
+      <button class="chip chip-all is-active" data-kategori="">Tüm Türler</button>
+      <button class="chip" data-kategori="ana" style="--chip-c:#8b5cf6">Piyasa</button>
+      <button class="chip" data-kategori="hisse" style="--chip-c:#8b5cf6">Hisse</button>
+      <button class="chip" data-kategori="etf" style="--chip-c:#8b5cf6">ETF</button>
+      <button class="chip" data-kategori="kripto" style="--chip-c:#8b5cf6">Kripto</button>
+      <button class="chip" data-kategori="pazar_nabzi" style="--chip-c:#8b5cf6">Pazar Nabzı</button>
+      <button class="chip" data-kategori="blog" style="--chip-c:#8b5cf6">Blog</button>
     </div>
 
     <div class="card-list" id="kayitliListe">
@@ -217,6 +267,7 @@
       </button>
     </div>
     <p class="detail-title" id="detailTitle"></p>
+    <p class="detail-original-title" id="detailOriginalTitle" style="display:none;"></p>
     <p class="detail-summary-label" id="detailSummaryLabel">Özet</p>
     <p class="detail-summary" id="detailSummary"></p>
 
