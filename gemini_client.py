@@ -67,11 +67,15 @@ def siniflandirma_prompt_olustur(ogeler: list[dict]) -> str:
             satir += f" | kaynak_ozeti={kaynak_ozeti}"
         girdi_listesi.append(satir)
 
-    return f"""Sen deneyimli bir borsa/finans analistisin. Aşağıda finviz.com
-sitesinden çekilmiş haber başlıklarının bir listesi var. Her haber için iki
-şey yap:
+    return f"""Sen deneyimli bir borsa/finans analistisin ve iyi bir
+çevirmensin. Aşağıda finviz.com sitesinden çekilmiş, çoğu İngilizce olan
+haber başlıklarının bir listesi var. Her haber için üç şey yap:
 
-1) ABD ve küresel borsalar / piyasalar açısından taşıdığı ÖNEM DERECESİNE
+1) Başlığı doğal, akıcı TÜRKÇE'ye çevir ("baslik_tr" alanı): kelimesi
+kelimesine değil, bir Türkçe haber başlığı gibi doğal dursun. Şirket/kişi
+adları ve ticker sembollerini olduğu gibi bırak.
+
+2) ABD ve küresel borsalar / piyasalar açısından taşıdığı ÖNEM DERECESİNE
 göre aşağıdaki 4 sınıftan birine ata:
 - "cok_onemli": Piyasaları geniş çapta hareket ettirebilecek haberler
   (Fed/merkez bankası kararları, faiz, enflasyon/istihdam gibi kritik makro
@@ -87,15 +91,15 @@ göre aşağıdaki 4 sınıftan birine ata:
 - "onemsiz": Borsayla ilgisi zayıf veya yok denecek kadar az olan haberler
   (magazin, spor, genel gündem, doğrudan finansal etkisi olmayan haberler).
 
-2) Haberi 1-2 cümleyle TÜRKÇE olarak özetle ("ozet" alanı): haberin ne
+3) Haberi 1-2 cümleyle TÜRKÇE olarak özetle ("ozet" alanı): haberin ne
 hakkında olduğunu, kim/ne/neden açısından kısaca açıkla. Bu bir gerekçe
 değil, haberin kendisinin kısa bir özeti olmalı.
 
 Haber listesi:
 {chr(10).join(girdi_listesi)}
 
-Her haber için id, sinif (yukarıdaki 4 değerden biri) ve ozet alanlarını
-içeren JSON dön. Sadece JSON dön."""
+Her haber için id, baslik_tr, sinif (yukarıdaki 4 değerden biri) ve ozet
+alanlarını içeren JSON dön. Sadece JSON dön."""
 
 
 def siniflandirma_schema_olustur() -> dict:
@@ -108,10 +112,11 @@ def siniflandirma_schema_olustur() -> dict:
                     "type": "OBJECT",
                     "properties": {
                         "id": {"type": "STRING"},
+                        "baslik_tr": {"type": "STRING"},
                         "sinif": {"type": "STRING", "enum": SINIF_SIRA},
                         "ozet": {"type": "STRING"},
                     },
-                    "required": ["id", "sinif", "ozet"],
+                    "required": ["id", "baslik_tr", "sinif", "ozet"],
                 },
             }
         },
