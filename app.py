@@ -3,10 +3,9 @@ Haber Takip Platformu - Vercel icin web surumu (v2: surekli izleme).
 
 Mimari:
   - /api/tara: disaridan (cron-job.org gibi ucretsiz bir servisten) periyodik
-    olarak cagrilir, POLL_SECRET ile korunur. /api/tara-manuel: ayni tarama
-    dongusunu arayuzdeki 'Şimdi Tara' butonu icin sirsiz calistirir. Ikisi de
-    Finviz'deki TUM haber turlerini + bloglari ceker, daha once gorulmemis
-    olanlari (bir seferde en fazla MAX_YENI_HABER_BASINA_TARAMA kadar,
+    olarak cagrilir, POLL_SECRET ile korunur. Finviz'deki TUM haber turlerini
+    + bloglari ceker, daha once gorulmemis olanlari (bir seferde en fazla
+    MAX_YENI_HABER_BASINA_TARAMA kadar, kategoriler arasinda adil dagitarak,
     zaman asimini asmamak icin) Gemini ile siniflandirir/ozetler/Turkce'ye
     cevirir, Upstash Redis'teki kalici depoya ekler; artik Finviz'de
     olmayanlari depodan siler. Esik asilinca (5 cok onemli / 10 onemli /
@@ -100,7 +99,9 @@ def haberler():
 @app.get("/api/ayarlar")
 def ayarlar_getir():
     try:
-        return {"ok": True, "ayarlar": redis_store.ayarlar_yukle()}
+        ayarlar = redis_store.ayarlar_yukle()
+        ayarlar["sonTestEpostasi"] = redis_store.son_test_epostasi_yukle()
+        return {"ok": True, "ayarlar": ayarlar}
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
@@ -114,6 +115,67 @@ async def ayarlar_guncelle(request: Request):
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
     return {"ok": True, "ayarlar": {"bildirim_epostalari": epostalar}}
+
+
+TEST_EPOSTA_BEKLEME_SANIYE = 10 * 60
+
+
+@app.post("/api/test-eposta")
+def test_eposta():
+    """Ayarlar modalindaki 'Deneme E-postası Gönder' butonu tarafindan
+    cagrilir; kotuye kullanimi/spam'i onlemek icin son gonderimden itibaren
+    TEST_EPOSTA_BEKLEME_SANIYE gecmeden tekrar gonderilemez (Redis'te kalici
+    olarak takip edilir, tarayici/sekme yenilense bile gecerlidir)."""
+    try:
+        ayarlar = redis_store.ayarlar_yukle()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    aliciler = ayarlar.get("bildirim_epostalari", [])
+    if not aliciler:
+        return JSONResponse({"ok": False, "hata": "Önce Ayarlar'a en az bir bildirim e-postası ekleyin."}, status_code=400)
+
+    if not email_client.yapilandirilmis_mi():
+        return JSONResponse({"ok": False, "hata": "Sunucuda RESEND_API_KEY tanımlı değil."}, status_code=500)
+
+    try:
+        son = redis_store.son_test_epostasi_yukle()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    if son:
+        try:
+            gecen_saniye = (datetime.now(timezone.utc) - datetime.fromisoformat(son)).total_seconds()
+        except ValueError:
+            gecen_saniye = TEST_EPOSTA_BEKLEME_SANIYE
+        if gecen_saniye < TEST_EPOSTA_BEKLEME_SANIYE:
+            kalan_saniye = int(TEST_EPOSTA_BEKLEME_SANIYE - gecen_saniye)
+            kalan_dk = kalan_saniye // 60 + 1
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "hata": f"Çok sık deneme e-postası istendi, {kalan_dk} dakika sonra tekrar deneyin.",
+                    "kalanSaniye": kalan_saniye,
+                },
+                status_code=429,
+            )
+
+    html = (
+        "<h2>Haber Takip Platformu</h2>"
+        "<p>Bu bir deneme e-postasıdır. Bu e-postayı görüyorsanız bildirim ayarlarınız doğru çalışıyor.</p>"
+    )
+    try:
+        email_client.eposta_gonder(aliciler, "Haber Takip Platformu - Deneme E-postası", html)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    simdi = datetime.now(timezone.utc).isoformat()
+    try:
+        redis_store.son_test_epostasi_kaydet(simdi)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    return {"ok": True, "gonderilenSayisi": len(aliciler), "sonTestEpostasi": simdi}
 
 
 @app.post("/api/analiz")
@@ -312,16 +374,6 @@ def tara(request: Request):
         if gelen_sir != beklenen_sir:
             return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
 
-    try:
-        return _tara_calistir()
-    except TaramaHatasi as e:
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=e.status_code)
-
-
-@app.post("/api/tara-manuel")
-def tara_manuel():
-    """Arayuzdeki 'Şimdi Tara' butonu tarafindan cagrilir; kullanicinin
-    kendi uygulamasi oldugu icin ayrica sir gerektirmez."""
     try:
         return _tara_calistir()
     except TaramaHatasi as e:

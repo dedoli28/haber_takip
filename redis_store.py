@@ -23,6 +23,7 @@ REPO_KEY = "htp:repo"
 AYARLAR_KEY = "htp:ayarlar"
 SAYAC_KEY = "htp:sayaclar"
 SON_TARAMA_KEY = "htp:son_tarama"
+SON_TEST_EPOSTASI_KEY = "htp:son_test_epostasi"
 
 VARSAYILAN_AYARLAR = {"bildirim_epostalari": []}
 # Esik sayaclari aslinda "bekleyen" (henuz e-postayla bildirilmemis) haberlerin
@@ -104,3 +105,11 @@ def son_tarama_yukle() -> str | None:
 
 def son_tarama_kaydet(iso_zaman: str) -> None:
     _set_ham(SON_TARAMA_KEY, iso_zaman)
+
+
+def son_test_epostasi_yukle() -> str | None:
+    return _get_ham(SON_TEST_EPOSTASI_KEY)
+
+
+def son_test_epostasi_kaydet(iso_zaman: str) -> None:
+    _set_ham(SON_TEST_EPOSTASI_KEY, iso_zaman)
