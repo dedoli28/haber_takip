@@ -8,8 +8,8 @@ Mimari:
     MAX_YENI_HABER_BASINA_TARAMA kadar, kategoriler arasinda adil dagitarak,
     zaman asimini asmamak icin) Gemini ile siniflandirir/ozetler/Turkce'ye
     cevirir, Upstash Redis'teki kalici depoya ekler; artik Finviz'de
-    olmayanlari depodan siler. Esik asilinca (5 cok onemli / 10 onemli /
-    30 bakmaya deger) e-posta gonderir.
+    olmayanlari depodan siler. Esik asilinca (3 cok onemli / 5 onemli /
+    15 bakmaya deger) e-posta gonderir.
   - /api/haberler: depodaki tum haberleri dondurur (istemci bunlari
     tarih/tur/onem'e gore kendi tarafinda filtreler).
   - /api/analiz, /api/gun-ozeti: istege bagli AI islemleri; sunucunun kendi
@@ -58,7 +58,7 @@ TARA_GRUP_BOYUTU = 20
 # sinirlandirilir; kapasiteyi asan yeni haberler depoya eklenmez, bu yuzden
 # bir sonraki taramada tekrar "yeni" olarak gorulup sirayla islenir.
 MAX_YENI_HABER_BASINA_TARAMA = 60
-ESIKLER = {"cok_onemli": 5, "onemli": 10, "bakmaya_deger": 30}
+ESIKLER = {"cok_onemli": 3, "onemli": 5, "bakmaya_deger": 15}
 SINIF_ETIKET_TR = {"cok_onemli": "Çok Önemli", "onemli": "Önemli", "bakmaya_deger": "Bakmaya Değer"}
 
 
