@@ -58,13 +58,32 @@ TARA_GRUP_BOYUTU = 20
 # taramasi + Gemini siniflandirmasi cron/Vercel zaman asimini asmasin diye
 # sinirlandirilir; kapasiteyi asan yeni haberler depoya eklenmez, bu yuzden
 # bir sonraki taramada tekrar "yeni" olarak gorulup sirayla islenir.
-MAX_YENI_HABER_BASINA_TARAMA = 40
+MAX_YENI_HABER_BASINA_TARAMA = 60
 ESIKLER = {"cok_onemli": 5, "onemli": 10, "bakmaya_deger": 30}
 SINIF_ETIKET_TR = {"cok_onemli": "Çok Önemli", "onemli": "Önemli", "bakmaya_deger": "Bakmaya Değer"}
 
 
 def _gemini_anahtari() -> str:
     return os.environ.get("GEMINI_API_KEY", "")
+
+
+def _kategoriler_arasi_adil_sec(ogeler: list[dict], sinir: int) -> list[dict]:
+    """Kapasite kadar oge secerken kategoriler arasinda sirayla (round-robin)
+    dagitir; boylece en cok haberi olan tek bir kategori (genelde 'ana')
+    kapasitenin tamamini tuketip digerlerini disarida birakmaz."""
+    kategoriler: dict[str, list[dict]] = {}
+    for o in ogeler:
+        kategoriler.setdefault(o.get("kategori", "ana"), []).append(o)
+
+    sirali_kategoriler = list(kategoriler.keys())
+    secilen: list[dict] = []
+    i = 0
+    while len(secilen) < sinir and any(kategoriler[k] for k in sirali_kategoriler):
+        k = sirali_kategoriler[i % len(sirali_kategoriler)]
+        if kategoriler[k]:
+            secilen.append(kategoriler[k].pop(0))
+        i += 1
+    return secilen
 
 
 @app.get("/api/haberler")
@@ -218,7 +237,7 @@ def _tara_calistir() -> dict:
 
     guncel_url_seti = {o["url"] for o in guncel_ogeler}
     tum_yeni_ogeler = [o for o in guncel_ogeler if o["url"] not in depo]
-    yeni_ogeler = tum_yeni_ogeler[:MAX_YENI_HABER_BASINA_TARAMA]
+    yeni_ogeler = _kategoriler_arasi_adil_sec(tum_yeni_ogeler, MAX_YENI_HABER_BASINA_TARAMA)
     isleme_alinmayan_sayisi = len(tum_yeni_ogeler) - len(yeni_ogeler)
 
     siniflandirma_hatalari: list[str] = []
