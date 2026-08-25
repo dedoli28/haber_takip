@@ -16,7 +16,6 @@
   </div>
   <nav class="tabs" id="tabNav">
     <button class="tab-btn is-active" data-tab="haberler">Haberler</button>
-    <button class="tab-btn" data-tab="bloglar">Bloglar</button>
     <button class="tab-btn" data-tab="kaydedilenler">Kaydedilenler</button>
   </nav>
   <div class="header-actions">
@@ -37,60 +36,35 @@
   <section class="view is-active" id="view-haberler">
     <div class="control-panel">
       <div class="control-row">
-        <div class="field">
-          <label>Model</label>
-          <select id="haberModel">
-            <option value="gemini-flash-lite-latest">gemini-flash-lite-latest</option>
-            <option value="gemini-flash-latest">gemini-flash-latest</option>
-            <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
-            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Kategori</label>
-          <select id="haberKategori">
-            <option value="ana">Piyasa Haberleri</option>
-            <option value="hisse">Hisse Senedi Haberleri</option>
-            <option value="etf">ETF Haberleri</option>
-            <option value="kripto">Kripto Haberleri</option>
-            <option value="pazar_nabzi">Pazar Nabzı</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Tarih</label>
-          <select id="haberGun">
-            <option value="bugun">Bugün</option>
-            <option value="dun">Dün</option>
-            <option value="aktif">Finviz'deki Aktif Haberler</option>
-          </select>
-        </div>
-        <div class="field-spacer"></div>
-        <button class="btn btn-primary" id="haberBtn">
-          <svg class="btn-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18 3v4h-4M6 21v-4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Haberleri Getir ve Sınıflandır
-        </button>
-        <button class="btn btn-primary" id="haberTumBtn">
-          <svg class="btn-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          Tüm Kategorileri Getir ve Sınıflandır
-        </button>
-        <button class="btn btn-outline" id="haberKaydetBtn" disabled>Markdown İndir</button>
-        <button class="btn btn-outline" id="haberGunOzetBtn" disabled>Günü Özetle</button>
-      </div>
-      <p class="hint">Not: "Finviz'deki Aktif Haberler" seçeneği tarihe göre filtrelemeden, Finviz'in o an sayfasında gösterdiği tüm haberleri getirir (bugün yeterince haber yoksa geçmişten de gelebilir). "Pazar Nabzı" kategorisindeki içerikler dış kaynaklı makaleler değil, Finviz'in kendi ürettiği kısa hisse güncellemeleridir — "Kaynağı Aç" ilgili hissenin Finviz sayfasına götürür. "Tüm Kategorileri Getir ve Sınıflandır" yukarıdaki Kategori seçimini yok sayıp 5 kategoriyi de birden çekip tek listede birleştirir.</p>
-    </div>
-
-    <div class="control-panel">
-      <div class="control-row">
         <div class="field" style="flex:1;">
           <label>Ara</label>
           <input type="text" id="haberArama" placeholder="Başlık veya özette ara...">
         </div>
+        <div class="field-spacer"></div>
+        <button class="btn btn-outline" id="haberYenileBtn">
+          <svg class="btn-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18 3v4h-4M6 21v-4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Yenile
+        </button>
+        <button class="btn btn-outline" id="haberKaydetBtn" disabled>Markdown İndir</button>
+        <button class="btn btn-primary" id="haberGunOzetBtn" disabled>Günü Özetle</button>
       </div>
+      <p class="hint" id="haberSonTarama">Sistem arka planda otomatik olarak Finviz'i tarıyor. Son tarama: —</p>
     </div>
 
-    <div class="status-row">
-      <span class="status-text" id="haberDurum">Hazır.</span>
-      <div class="progress-track"><div class="progress-fill" id="haberProgress"></div></div>
+    <div class="chip-row" id="haberTarihChips">
+      <button class="chip chip-all is-active" data-tarih="">Tüm Tarihler</button>
+      <button class="chip" data-tarih="bugun" style="--chip-c:#22c55e">Bugün</button>
+      <button class="chip" data-tarih="dun" style="--chip-c:#22c55e">Dün</button>
+    </div>
+
+    <div class="chip-row" id="haberKategoriChips">
+      <button class="chip chip-all is-active" data-kategori="">Tüm Türler</button>
+      <button class="chip" data-kategori="ana" style="--chip-c:#8b5cf6">Piyasa</button>
+      <button class="chip" data-kategori="hisse" style="--chip-c:#8b5cf6">Hisse</button>
+      <button class="chip" data-kategori="etf" style="--chip-c:#8b5cf6">ETF</button>
+      <button class="chip" data-kategori="kripto" style="--chip-c:#8b5cf6">Kripto</button>
+      <button class="chip" data-kategori="pazar_nabzi" style="--chip-c:#8b5cf6">Pazar Nabzı</button>
+      <button class="chip" data-kategori="blog" style="--chip-c:#8b5cf6">Blog</button>
     </div>
 
     <div class="chip-row" id="haberChips">
@@ -101,81 +75,10 @@
       <button class="chip" data-sinif="onemsiz" style="--chip-c:#6b7280">Önemsiz</button>
     </div>
 
-    <div class="chip-row" id="haberKategoriChips">
-      <button class="chip chip-all is-active" data-kategori="">Tüm Türler</button>
-      <button class="chip" data-kategori="ana" style="--chip-c:#8b5cf6">Piyasa</button>
-      <button class="chip" data-kategori="hisse" style="--chip-c:#8b5cf6">Hisse</button>
-      <button class="chip" data-kategori="etf" style="--chip-c:#8b5cf6">ETF</button>
-      <button class="chip" data-kategori="kripto" style="--chip-c:#8b5cf6">Kripto</button>
-      <button class="chip" data-kategori="pazar_nabzi" style="--chip-c:#8b5cf6">Pazar Nabzı</button>
-    </div>
-
     <div class="card-list" id="haberListe">
       <div class="empty-state">
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13Z" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 8.5h9M7.5 12h9M7.5 15.5h5.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-        <p>Henüz haber yok.<br>"Haberleri Getir ve Sınıflandır" butonuna tıkla.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- ===================== BLOGLAR ===================== -->
-  <section class="view" id="view-bloglar">
-    <div class="control-panel">
-      <div class="control-row">
-        <div class="field">
-          <label>Model</label>
-          <select id="blogModel">
-            <option value="gemini-flash-lite-latest">gemini-flash-lite-latest</option>
-            <option value="gemini-flash-latest">gemini-flash-latest</option>
-            <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
-            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Tarih</label>
-          <select id="blogGun">
-            <option value="bugun">Bugün</option>
-            <option value="dun">Dün</option>
-            <option value="aktif">Finviz'deki Aktif Bloglar</option>
-          </select>
-        </div>
-        <div class="field-spacer"></div>
-        <button class="btn btn-primary" id="blogBtn">
-          <svg class="btn-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18 3v4h-4M6 21v-4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Blogları Getir ve Sınıflandır
-        </button>
-        <button class="btn btn-outline" id="blogKaydetBtn" disabled>Markdown İndir</button>
-        <button class="btn btn-outline" id="blogGunOzetBtn" disabled>Günü Özetle</button>
-      </div>
-      <p class="hint">Finviz'in "Blogs" sekmesindeki yazarlar/blog gönderileri.</p>
-    </div>
-
-    <div class="control-panel">
-      <div class="control-row">
-        <div class="field" style="flex:1;">
-          <label>Ara</label>
-          <input type="text" id="blogArama" placeholder="Başlık veya özette ara...">
-        </div>
-      </div>
-    </div>
-
-    <div class="status-row">
-      <span class="status-text" id="blogDurum">Hazır.</span>
-      <div class="progress-track"><div class="progress-fill" id="blogProgress"></div></div>
-    </div>
-
-    <div class="chip-row" id="blogChips">
-      <button class="chip chip-all is-active" data-sinif="">Tümü</button>
-      <button class="chip" data-sinif="cok_onemli" style="--chip-c:#ef4444">Çok Önemli</button>
-      <button class="chip" data-sinif="onemli" style="--chip-c:#f59e0b">Önemli</button>
-      <button class="chip" data-sinif="bakmaya_deger" style="--chip-c:#3b82f6">Bakmaya Değer</button>
-      <button class="chip" data-sinif="onemsiz" style="--chip-c:#6b7280">Önemsiz</button>
-    </div>
-
-    <div class="card-list" id="blogListe">
-      <div class="empty-state">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13Z" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 8.5h9M7.5 12h9M7.5 15.5h5.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-        <p>Henüz blog yazısı yok.<br>"Blogları Getir ve Sınıflandır" butonuna tıkla.</p>
+        <p>Henüz haber yok. Arka plan taraması ilk sonuçları getirdiğinde burada görünecek.<br>"Yenile"ye basarak da kontrol edebilirsin.</p>
       </div>
     </div>
   </section>
@@ -184,7 +87,7 @@
   <section class="view" id="view-kaydedilenler">
     <div class="control-panel">
       <div class="control-row">
-        <p class="hint" style="margin:0;">Kaydettiğin haber/blogların özeti, önem seviyesi ve (varsa) analizi burada saklanır — tekrar Gemini'ye gönderilmez.</p>
+        <p class="hint" style="margin:0;">Kaydettiğin haber/blogların özeti, önem seviyesi ve (varsa) analizi burada saklanır — arka plan taraması bunları temizlemez.</p>
         <div class="field-spacer"></div>
         <button class="btn btn-outline" id="kayitliKaydetBtn" disabled>Markdown İndir</button>
         <button class="btn btn-outline" id="kayitliTemizleBtn">Tümünü Temizle</button>
@@ -239,17 +142,13 @@
     </div>
 
     <div class="modal-section">
-      <div class="modal-section-title">Gemini API Anahtarı</div>
-      <p class="modal-hint">Haber sınıflandırması için kullanılır. Ücretsiz alınabilir. Anahtar yalnızca bu tarayıcıda (localStorage) saklanır, sunucuda tutulmaz.</p>
+      <div class="modal-section-title">Bildirim E-postaları</div>
+      <p class="modal-hint">Arka plan taraması <strong>5 Çok Önemli</strong>, <strong>10 Önemli</strong> ya da <strong>30 Bakmaya Değer</strong> yeni haber biriktirdiğinde bu adreslere e-posta gönderilir.</p>
       <div class="key-row">
-        <input type="password" id="geminiKeyInput" placeholder="API anahtarınızı yapıştırın">
-        <button class="icon-btn" id="geminiKeyToggle" title="Göster/gizle">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="2.7" stroke="currentColor" stroke-width="1.5"/></svg>
-        </button>
-        <button class="btn btn-primary btn-sm" id="geminiKeySave">Kaydet</button>
+        <input type="text" id="epostaInput" placeholder="ornek@eposta.com">
+        <button class="btn btn-primary btn-sm" id="epostaEkleBtn">Ekle</button>
       </div>
-      <div class="key-status-line" id="geminiKeyStatus">Tanımlı değil</div>
-      <a class="modal-link" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Ücretsiz anahtar al -&gt; aistudio.google.com/apikey</a>
+      <div class="account-chip-row" id="epostaListesi" style="margin-top:12px;"></div>
     </div>
   </div>
 </div>
@@ -294,14 +193,16 @@
 
 <!-- ===================== GÜN ÖZETİ MODAL ===================== -->
 <div class="modal-overlay" id="daySummaryOverlay">
-  <div class="modal">
+  <div class="modal modal-wide">
     <div class="modal-head">
-      <h3 id="daySummaryTitle">Günün Özeti</h3>
+      <h3>Günün Özeti</h3>
       <button class="icon-btn" id="closeDaySummary">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
     </div>
-    <p class="detail-summary" id="daySummaryText" style="margin-top:14px;">Hazırlanıyor...</p>
+    <div id="daySummaryBody" style="margin-top:14px;">
+      <p class="detail-summary">Hazırlanıyor...</p>
+    </div>
   </div>
 </div>
 

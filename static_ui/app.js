@@ -1,10 +1,8 @@
 "use strict";
 
 /* ===================== Ayarlar ===================== */
-const BATCH_SIZE = 20;
-const ES_ZAMANLI_ISTEK = 2;
 const KAYDEDILEN_KEY = "kaydedilen_haberler_v1";
-const TUM_HABER_KATEGORILERI = ["ana", "hisse", "etf", "kripto", "pazar_nabzi"];
+const OTOMATIK_YENILEME_MS = 60 * 1000; // arka plandaki gercek tarama sunucuda (cron) calisir; burada sadece depoyu tazeleriz
 
 const SINIF_SIRA = ["cok_onemli", "onemli", "bakmaya_deger", "onemsiz"];
 const SINIF_ETIKET = {
@@ -21,11 +19,10 @@ const KATEGORI_ETIKET = {
   pazar_nabzi: "Pazar Nabzı",
   blog: "Blog",
 };
+const KATEGORI_SIRA = ["ana", "hisse", "etf", "kripto", "pazar_nabzi", "blog"];
 
 /* ===================== Helpers ===================== */
 function $(id) { return document.getElementById(id); }
-
-function gecikme(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 function toast(mesaj, tur = "ok") {
   const el = document.createElement("div");
@@ -47,20 +44,18 @@ function ustProgres(aktif) {
   }
 }
 
-function maskele(anahtar) {
-  if (anahtar.length <= 8) return "*".repeat(anahtar.length);
-  return anahtar.slice(0, 4) + "*".repeat(anahtar.length - 8) + anahtar.slice(-4);
+function yerelTarihIso(d) {
+  const yy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
 }
 
-/* ===================== API anahtarı (tarayıcıda saklanır) ===================== */
-function anahtarAl() { return localStorage.getItem("gemini_api_key") || ""; }
-function anahtarKaydet(k) { localStorage.setItem("gemini_api_key", k); }
-function modelAl() { return localStorage.getItem("gemini_model") || "gemini-flash-lite-latest"; }
-function modelKaydet(m) { localStorage.setItem("gemini_model", m); }
-
-function apiAnahtariGerekliUyar() {
-  toast("Önce Ayarlar'dan bir Gemini API anahtarı girin.", "warn");
-  $("settingsOverlay").classList.add("is-open");
+function bugununTarihi() { return yerelTarihIso(new Date()); }
+function dununTarihi() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return yerelTarihIso(d);
 }
 
 /* ===================== Tema ===================== */
@@ -92,45 +87,106 @@ function sekmeBaslat(sekmeDegistiCallback) {
   });
 }
 
-/* ===================== Ayarlar modal ===================== */
+/* ===================== Ayarlar modal (bildirim e-postaları) ===================== */
+function epostaChipCiz(epostalar) {
+  const kutu = $("epostaListesi");
+  kutu.innerHTML = "";
+  if (epostalar.length === 0) {
+    const bos = document.createElement("p");
+    bos.className = "modal-hint";
+    bos.style.margin = "0";
+    bos.textContent = "Henüz bildirim e-postası eklenmedi.";
+    kutu.appendChild(bos);
+    return;
+  }
+  epostalar.forEach((eposta) => {
+    const chip = document.createElement("span");
+    chip.className = "chip is-active";
+    chip.style.cursor = "default";
+    chip.style.display = "inline-flex";
+    chip.style.alignItems = "center";
+    chip.style.gap = "8px";
+    chip.textContent = eposta;
+
+    const sil = document.createElement("span");
+    sil.textContent = "✕";
+    sil.style.cursor = "pointer";
+    sil.style.opacity = "0.85";
+    sil.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await epostaListesiGuncelle(epostalar.filter((x) => x !== eposta));
+    });
+    chip.appendChild(sil);
+    kutu.appendChild(chip);
+  });
+}
+
+async function epostaAyarlariYukle() {
+  try {
+    const resp = await fetch("/api/ayarlar");
+    const yanit = await resp.json();
+    if (yanit.ok) {
+      epostaChipCiz(yanit.ayarlar.bildirim_epostalari || []);
+    } else {
+      toast(yanit.hata || "Ayarlar alınamadı.", "error");
+    }
+  } catch (e) {
+    toast("Ayarlar alınamadı: " + e, "error");
+  }
+}
+
+async function epostaListesiGuncelle(yeniListe) {
+  try {
+    const resp = await fetch("/api/ayarlar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bildirim_epostalari: yeniListe }),
+    });
+    const yanit = await resp.json();
+    if (yanit.ok) {
+      epostaChipCiz(yanit.ayarlar.bildirim_epostalari || []);
+      toast("Bildirim e-postaları güncellendi.", "ok");
+    } else {
+      toast(yanit.hata || "Kaydedilemedi.", "error");
+    }
+  } catch (e) {
+    toast("Kaydedilemedi: " + e, "error");
+  }
+}
+
+function epostaGecerliMi(eposta) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(eposta);
+}
+
 function ayarlarBaslat() {
-  $("openSettings").addEventListener("click", () => $("settingsOverlay").classList.add("is-open"));
+  $("openSettings").addEventListener("click", () => {
+    $("settingsOverlay").classList.add("is-open");
+    epostaAyarlariYukle();
+  });
   $("closeSettings").addEventListener("click", () => $("settingsOverlay").classList.remove("is-open"));
   $("settingsOverlay").addEventListener("click", (e) => {
     if (e.target === $("settingsOverlay")) $("settingsOverlay").classList.remove("is-open");
   });
 
-  $("geminiKeyToggle").addEventListener("click", () => sifreGosterGizle("geminiKeyInput"));
+  async function epostaEkle() {
+    const input = $("epostaInput");
+    const deger = input.value.trim();
+    if (!deger) return;
+    if (!epostaGecerliMi(deger)) { toast("Geçerli bir e-posta adresi gir.", "warn"); return; }
 
-  $("geminiKeySave").addEventListener("click", () => {
-    const deger = $("geminiKeyInput").value.trim();
-    if (!deger) { toast("Boş anahtar girildi.", "warn"); return; }
-    anahtarKaydet(deger);
-    $("geminiKeyStatus").textContent = `Kayıtlı: ${maskele(deger)}`;
-    $("geminiKeyInput").value = "";
-    toast("Gemini API anahtarı bu tarayıcıya kaydedildi.", "ok");
-  });
+    const resp = await fetch("/api/ayarlar");
+    const yanit = await resp.json();
+    const mevcut = yanit.ok ? (yanit.ayarlar.bildirim_epostalari || []) : [];
+    if (mevcut.includes(deger)) { toast("Bu e-posta zaten ekli.", "warn"); return; }
 
-  $("haberModel").addEventListener("change", () => modelKaydet($("haberModel").value));
-  $("blogModel").addEventListener("change", () => modelKaydet($("blogModel").value));
-}
-function sifreGosterGizle(inputId) {
-  const el = $(inputId);
-  el.type = el.type === "password" ? "text" : "password";
-}
-
-function durumYukle() {
-  const anahtar = anahtarAl();
-  if (anahtar) {
-    $("geminiKeyStatus").textContent = `Kayıtlı: ${maskele(anahtar)}`;
-  } else {
-    $("geminiKeyStatus").textContent = "Tanımlı değil";
-    toast("Başlamak için Ayarlar'dan bir Gemini API anahtarı girmen gerekiyor.", "warn");
-    $("settingsOverlay").classList.add("is-open");
+    await epostaListesiGuncelle([...mevcut, deger]);
+    input.value = "";
   }
-  const model = modelAl();
-  $("haberModel").value = model;
-  $("blogModel").value = model;
+
+  $("epostaEkleBtn").addEventListener("click", epostaEkle);
+  $("epostaInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") epostaEkle();
+  });
 }
 
 /* ===================== Kaydedilenler (localStorage) ===================== */
@@ -162,7 +218,7 @@ function kaydedilenKaldir(url) {
 /* ===================== Markdown indirme (ortak) ===================== */
 function indirMarkdown(ogeler, baslikMetni, dosyaOnEki) {
   if (ogeler.length === 0) return;
-  const bugun = new Date().toISOString().slice(0, 10);
+  const bugun = bugununTarihi();
   const satirlar = [`# ${baslikMetni} - ${bugun}`, ""];
 
   SINIF_SIRA.forEach((sinif) => {
@@ -191,7 +247,7 @@ function indirMarkdown(ogeler, baslikMetni, dosyaOnEki) {
   toast("Markdown dosyası indirildi.", "ok");
 }
 
-/* ===================== Detay modal (haber/blog/kayıtlı ortak) ===================== */
+/* ===================== Detay modal (haber/kayıtlı ortak) ===================== */
 let suankiOge = null;
 
 function kaydetButonuGuncelle() {
@@ -264,8 +320,6 @@ function detayModalBaslat(kayitliPanelYenile) {
 
   $("detailAnalizBtn").addEventListener("click", async () => {
     if (!suankiOge) return;
-    const apiKey = anahtarAl();
-    if (!apiKey) { apiAnahtariGerekliUyar(); return; }
 
     const btn = $("detailAnalizBtn");
     const text = $("detailAnalizText");
@@ -283,8 +337,6 @@ function detayModalBaslat(kayitliPanelYenile) {
           baslik: suankiOge.baslikTr || suankiOge.baslik,
           ozet: suankiOge.ai_ozet,
           kaynakOzeti: suankiOge.kaynakOzeti,
-          apiKey,
-          model: modelAl(),
         }),
       });
       const yanit = await resp.json();
@@ -318,33 +370,55 @@ function gunOzetiModalBaslat() {
   });
 }
 
-async function gunuOzetle(ogeler, model) {
-  const apiKey = anahtarAl();
-  if (!apiKey) { apiAnahtariGerekliUyar(); return; }
-  if (ogeler.length === 0) return;
-
-  $("daySummaryText").textContent = "Hazırlanıyor...";
+async function gunuOzetle() {
+  $("daySummaryBody").innerHTML = '<p class="detail-summary">Hazırlanıyor...</p>';
   $("daySummaryOverlay").classList.add("is-open");
 
   try {
-    const resp = await fetch("/api/gun-ozeti", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        haberler: ogeler.map((h) => ({ sinif: h.sinif, baslik: h.baslikTr || h.baslik, ozet: h.ai_ozet })),
-        apiKey,
-        model,
-      }),
-    });
+    const resp = await fetch("/api/gun-ozeti", { method: "POST" });
     const yanit = await resp.json();
-    if (yanit.ok) {
-      $("daySummaryText").textContent = yanit.ozet;
-    } else {
-      $("daySummaryText").textContent = yanit.hata || "Özet alınamadı.";
+    if (!yanit.ok) {
+      $("daySummaryBody").innerHTML = `<p class="detail-summary">${yanit.hata || "Özet alınamadı."}</p>`;
       toast(yanit.hata || "Özet alınamadı.", "error");
+      return;
     }
+
+    const govde = $("daySummaryBody");
+    govde.innerHTML = "";
+
+    const kategoriler = [...(yanit.kategoriler || [])].sort(
+      (a, b) => KATEGORI_SIRA.indexOf(a.kategori) - KATEGORI_SIRA.indexOf(b.kategori)
+    );
+
+    kategoriler.forEach((k) => {
+      const baslik = document.createElement("p");
+      baslik.className = "modal-section-title";
+      baslik.style.marginTop = "14px";
+      baslik.textContent = KATEGORI_ETIKET[k.kategori] || k.kategori;
+      govde.appendChild(baslik);
+
+      const ozet = document.createElement("p");
+      ozet.className = "detail-summary";
+      ozet.textContent = k.ozet;
+      govde.appendChild(ozet);
+    });
+
+    const ayrac = document.createElement("div");
+    ayrac.className = "modal-divider";
+    ayrac.style.margin = "18px 0";
+    govde.appendChild(ayrac);
+
+    const genelBaslik = document.createElement("p");
+    genelBaslik.className = "modal-section-title";
+    genelBaslik.textContent = "Genel Özet";
+    govde.appendChild(genelBaslik);
+
+    const genelOzet = document.createElement("p");
+    genelOzet.className = "detail-summary";
+    genelOzet.textContent = yanit.genelOzet || "";
+    govde.appendChild(genelOzet);
   } catch (e) {
-    $("daySummaryText").textContent = "Beklenmeyen hata: " + e;
+    $("daySummaryBody").innerHTML = `<p class="detail-summary">Beklenmeyen hata: ${e}</p>`;
   }
 }
 
@@ -408,96 +482,21 @@ function bosDurumCiz(konteynerId, mesaj) {
   kutu.appendChild(bos);
 }
 
-function iskeletCiz(konteynerId, adet = 4) {
-  const kutu = $(konteynerId);
-  kutu.innerHTML = "";
-  for (let i = 0; i < adet; i++) {
-    const s = document.createElement("div");
-    s.className = "skeleton-card";
-    kutu.appendChild(s);
-  }
-}
+/* ===================== Haberler paneli (yalnizca filtreleme, cekme yok) ===================== */
+function haberPaneliOlustur() {
+  const state = { tumOgeler: [], sinifFiltre: "", kategoriFiltre: "", tarihFiltre: "", arama: "" };
 
-/* ===================== Ortak: bir grup öğeyi Gemini ile sınıflandır ===================== */
-async function topluSiniflandir(tumler, apiKey, model, ilerlemeCB) {
-  const sonucMap = new Map(
-    tumler.map((h) => [h.id, { ...h, sinif: "bakmaya_deger", ai_ozet: "", baslikTr: h.baslik }])
-  );
-  const gruplar = [];
-  for (let i = 0; i < tumler.length; i += BATCH_SIZE) gruplar.push(tumler.slice(i, i + BATCH_SIZE));
+  const sinifChips = document.querySelectorAll("#haberChips .chip");
+  const kategoriChips = document.querySelectorAll("#haberKategoriChips .chip");
+  const tarihChips = document.querySelectorAll("#haberTarihChips .chip");
+  const arama = $("haberArama");
 
-  let tamamlanan = 0;
-  let ilkHata = null;
-  let siraNo = 0;
-
-  async function isci(isciIndex) {
-    await gecikme(isciIndex * 500);
-    while (siraNo < gruplar.length) {
-      const grup = gruplar[siraNo++];
-      try {
-        const resp = await fetch("/api/siniflandir", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            items: grup.map((h) => ({ id: h.id, saat: h.saat, baslik: h.baslik, kaynakOzeti: h.kaynakOzeti })),
-            apiKey,
-            model,
-          }),
-        });
-        const yanit = await resp.json();
-        if (yanit.ok) {
-          yanit.results.forEach((r) => {
-            const mevcut = sonucMap.get(r.id);
-            if (mevcut) {
-              mevcut.sinif = r.sinif;
-              mevcut.ai_ozet = r.ozet;
-              if (r.baslik_tr) mevcut.baslikTr = r.baslik_tr;
-            }
-          });
-        } else if (!ilkHata) {
-          ilkHata = yanit.hata || "Sınıflandırma başarısız.";
-        }
-      } catch (e) {
-        if (!ilkHata) ilkHata = String(e);
-      }
-      tamamlanan += grup.length;
-      if (ilerlemeCB) ilerlemeCB(tamamlanan, tumler.length);
-      await gecikme(300);
-    }
-  }
-
-  const isciSayisi = Math.min(ES_ZAMANLI_ISTEK, gruplar.length);
-  await Promise.all(Array.from({ length: isciSayisi }, (_v, i) => isci(i)));
-
-  return { sonuclar: Array.from(sonucMap.values()), ilkHata };
-}
-
-/* ===================== Panel (Haberler / Bloglar ortak mantığı) ===================== */
-function panelOlustur(cfg) {
-  const state = { ogeler: [], filtre: "", kategoriFiltre: "", arama: "", calisiyor: false };
-
-  const el = {
-    model: $(`${cfg.prefix}Model`),
-    kategori: cfg.kategoriId ? $(cfg.kategoriId) : null,
-    gun: $(`${cfg.prefix}Gun`),
-    btn: $(`${cfg.prefix}Btn`),
-    tumBtn: cfg.tumBtnId ? $(cfg.tumBtnId) : null,
-    kaydetBtn: $(`${cfg.prefix}KaydetBtn`),
-    gunOzetBtn: $(`${cfg.prefix}GunOzetBtn`),
-    durum: $(`${cfg.prefix}Durum`),
-    progress: $(`${cfg.prefix}Progress`),
-    chips: document.querySelectorAll(`#${cfg.prefix}Chips .chip`),
-    kategoriChips: cfg.kategoriChipsId ? document.querySelectorAll(`#${cfg.kategoriChipsId} .chip`) : null,
-    arama: cfg.aramaId ? $(cfg.aramaId) : null,
-    liste: `${cfg.prefix}Liste`,
-  };
-
-  function ciz() {
-    const kutu = $(el.liste);
-    kutu.innerHTML = "";
-    let gorulen = state.ogeler;
-    if (state.filtre) gorulen = gorulen.filter((h) => h.sinif === state.filtre);
+  function filtrele() {
+    let gorulen = state.tumOgeler;
+    if (state.sinifFiltre) gorulen = gorulen.filter((h) => h.sinif === state.sinifFiltre);
     if (state.kategoriFiltre) gorulen = gorulen.filter((h) => h.kategori === state.kategoriFiltre);
+    if (state.tarihFiltre === "bugun") gorulen = gorulen.filter((h) => h.tarih === bugununTarihi());
+    if (state.tarihFiltre === "dun") gorulen = gorulen.filter((h) => h.tarih === dununTarihi());
     if (state.arama) {
       const q = state.arama.toLowerCase();
       gorulen = gorulen.filter(
@@ -507,233 +506,128 @@ function panelOlustur(cfg) {
           (h.ai_ozet || "").toLowerCase().includes(q)
       );
     }
+    return gorulen;
+  }
+
+  function chipSayilariGuncelle() {
+    const sayilar = {};
+    state.tumOgeler.forEach((h) => { sayilar[h.sinif] = (sayilar[h.sinif] || 0) + 1; });
+    sinifChips.forEach((chip) => {
+      const sinif = chip.dataset.sinif;
+      if (!sinif) { chip.textContent = `Tümü (${state.tumOgeler.length})`; return; }
+      chip.textContent = `${SINIF_ETIKET[sinif]} (${sayilar[sinif] || 0})`;
+    });
+
+    const katSayilar = {};
+    state.tumOgeler.forEach((h) => { if (h.kategori) katSayilar[h.kategori] = (katSayilar[h.kategori] || 0) + 1; });
+    kategoriChips.forEach((chip) => {
+      const kat = chip.dataset.kategori;
+      if (!kat) { chip.textContent = `Tüm Türler (${state.tumOgeler.length})`; return; }
+      chip.textContent = `${KATEGORI_ETIKET[kat] || kat} (${katSayilar[kat] || 0})`;
+    });
+
+    const bugun = bugununTarihi();
+    const dun = dununTarihi();
+    const bugunSayisi = state.tumOgeler.filter((h) => h.tarih === bugun).length;
+    const dunSayisi = state.tumOgeler.filter((h) => h.tarih === dun).length;
+    tarihChips.forEach((chip) => {
+      const t = chip.dataset.tarih;
+      if (!t) { chip.textContent = `Tüm Tarihler (${state.tumOgeler.length})`; return; }
+      chip.textContent = t === "bugun" ? `Bugün (${bugunSayisi})` : `Dün (${dunSayisi})`;
+    });
+  }
+
+  function ciz() {
+    const kutu = $("haberListe");
+    kutu.innerHTML = "";
+    const gorulen = filtrele();
+
+    $("haberKaydetBtn").disabled = state.tumOgeler.length === 0;
+    $("haberGunOzetBtn").disabled = state.tumOgeler.length === 0;
 
     if (gorulen.length === 0) {
-      bosDurumCiz(el.liste, state.ogeler.length ? "Seçilen filtre/aramayla eşleşen içerik yok." : cfg.varsayilanBosMesaj);
+      bosDurumCiz(
+        "haberListe",
+        state.tumOgeler.length
+          ? "Seçilen filtre/aramayla eşleşen içerik yok."
+          : 'Henüz haber yok. Arka plan taraması ilk sonuçları getirdiğinde burada görünecek.<br>"Yenile"ye basarak da kontrol edebilirsin.'
+      );
       return;
     }
     gorulen.forEach((h, i) => kutu.appendChild(kartOlustur(h, i, detayGoster)));
   }
 
-  function chipSayilariGuncelle() {
-    const sayilar = {};
-    state.ogeler.forEach((h) => { sayilar[h.sinif] = (sayilar[h.sinif] || 0) + 1; });
-    el.chips.forEach((chip) => {
-      const sinif = chip.dataset.sinif;
-      if (!sinif) { chip.textContent = `Tümü (${state.ogeler.length})`; return; }
-      chip.textContent = `${SINIF_ETIKET[sinif]} (${sayilar[sinif] || 0})`;
+  sinifChips.forEach((chip) => {
+    chip.addEventListener("click", () => {
+      state.sinifFiltre = chip.dataset.sinif;
+      sinifChips.forEach((c) => c.classList.remove("is-active"));
+      chip.classList.add("is-active");
+      ciz();
     });
-
-    if (el.kategoriChips) {
-      const katSayilar = {};
-      state.ogeler.forEach((h) => { if (h.kategori) katSayilar[h.kategori] = (katSayilar[h.kategori] || 0) + 1; });
-      el.kategoriChips.forEach((chip) => {
-        const kat = chip.dataset.kategori;
-        if (!kat) { chip.textContent = `Tüm Türler (${state.ogeler.length})`; return; }
-        chip.textContent = `${KATEGORI_ETIKET[kat] || kat} (${katSayilar[kat] || 0})`;
-      });
-    }
-  }
-
-  function chipBaslat() {
-    el.chips.forEach((chip) => {
-      chip.addEventListener("click", () => {
-        state.filtre = chip.dataset.sinif;
-        el.chips.forEach((c) => c.classList.remove("is-active"));
-        chip.classList.add("is-active");
-        ciz();
-      });
-    });
-
-    if (el.kategoriChips) {
-      el.kategoriChips.forEach((chip) => {
-        chip.addEventListener("click", () => {
-          state.kategoriFiltre = chip.dataset.kategori;
-          el.kategoriChips.forEach((c) => c.classList.remove("is-active"));
-          chip.classList.add("is-active");
-          ciz();
-        });
-      });
-    }
-
-    if (el.arama) {
-      el.arama.addEventListener("input", () => {
-        state.arama = el.arama.value.trim();
-        ciz();
-      });
-    }
-  }
-
-  function sonuclariUygula(sonuclar) {
-    state.ogeler = sonuclar;
-    chipSayilariGuncelle();
-    ciz();
-    el.kaydetBtn.disabled = false;
-    if (el.gunOzetBtn) el.gunOzetBtn.disabled = false;
-  }
-
-  async function getir() {
-    if (state.calisiyor) return;
-
-    const apiKey = anahtarAl();
-    if (!apiKey) { apiAnahtariGerekliUyar(); return; }
-
-    state.calisiyor = true;
-    state.ogeler = [];
-    iskeletCiz(el.liste, 5);
-    el.kaydetBtn.disabled = true;
-    if (el.gunOzetBtn) el.gunOzetBtn.disabled = true;
-    el.btn.disabled = true;
-    if (el.tumBtn) el.tumBtn.disabled = true;
-    const orijinalBtnMetni = el.btn.textContent.trim();
-    el.btn.textContent = "Çalışıyor...";
-    el.progress.style.width = "0%";
-    el.durum.textContent = "Finviz'den içerikler çekiliyor...";
-    ustProgres(true);
-
-    const model = el.model.value;
-    const gun = el.gun.value;
-    const kategori = el.kategori ? el.kategori.value : "ana";
-    const kategoriEtiketi = cfg.tur === "blog" ? "blog" : kategori;
-
-    try {
-      const parametreler = new URLSearchParams({ gun, tur: cfg.tur, kategori });
-      const cekResp = await fetch(`/api/haberler?${parametreler.toString()}`);
-      const cekSonuc = await cekResp.json();
-
-      if (!cekSonuc.ok) {
-        toast(cekSonuc.hata || "İçerikler alınamadı.", "error");
-        el.durum.textContent = "Hata oluştu.";
-        return;
-      }
-
-      const tumler = cekSonuc.haberler;
-      tumler.forEach((h) => { h.kategori = kategoriEtiketi; });
-
-      if (tumler.length === 0) {
-        el.durum.textContent = gun === "aktif" ? "Şu an gösterilecek içerik bulunamadı." : `${cekSonuc.tarih} tarihine ait içerik bulunamadı.`;
-        bosDurumCiz(el.liste, "Seçilen filtre için içerik bulunamadı.");
-        return;
-      }
-
-      el.durum.textContent = `${tumler.length} içerik bulundu. Sınıflandırılıyor...`;
-
-      const { sonuclar, ilkHata } = await topluSiniflandir(tumler, apiKey, model, (tamam, top) => {
-        el.progress.style.width = `${Math.round((tamam / top) * 100)}%`;
-        el.durum.textContent = `Sınıflandırılıyor... ${tamam}/${top}`;
-      });
-
-      sonuclariUygula(sonuclar);
-
-      if (ilkHata) {
-        el.durum.textContent = "Tamamlandı (bazı gruplar başarısız oldu).";
-        toast(ilkHata, "warn");
-      } else {
-        el.durum.textContent = `Tamamlandı. Toplam ${tumler.length} içerik (${new Date().toLocaleTimeString("tr-TR")}).`;
-      }
-    } catch (e) {
-      toast("Beklenmeyen hata: " + e, "error");
-      el.durum.textContent = "Hata oluştu.";
-    } finally {
-      state.calisiyor = false;
-      el.btn.disabled = false;
-      if (el.tumBtn) el.tumBtn.disabled = false;
-      el.btn.textContent = orijinalBtnMetni;
-      ustProgres(false);
-    }
-  }
-
-  async function tumKategorileriGetir() {
-    if (state.calisiyor) return;
-
-    const apiKey = anahtarAl();
-    if (!apiKey) { apiAnahtariGerekliUyar(); return; }
-
-    state.calisiyor = true;
-    state.ogeler = [];
-    iskeletCiz(el.liste, 6);
-    el.kaydetBtn.disabled = true;
-    if (el.gunOzetBtn) el.gunOzetBtn.disabled = true;
-    el.btn.disabled = true;
-    el.tumBtn.disabled = true;
-    const oncekiTumMetni = el.tumBtn.textContent.trim();
-    el.tumBtn.textContent = "Çalışıyor...";
-    el.progress.style.width = "0%";
-    el.durum.textContent = "Tüm kategoriler Finviz'den çekiliyor...";
-    ustProgres(true);
-
-    const model = el.model.value;
-    const gun = el.gun.value;
-
-    try {
-      const birlesik = [];
-      const gorulenUrl = new Set();
-
-      for (const kat of TUM_HABER_KATEGORILERI) {
-        try {
-          const parametreler = new URLSearchParams({ gun, tur: "haber", kategori: kat });
-          const resp = await fetch(`/api/haberler?${parametreler.toString()}`);
-          const sonuc = await resp.json();
-          if (sonuc.ok) {
-            sonuc.haberler.forEach((h) => {
-              if (!gorulenUrl.has(h.url)) {
-                gorulenUrl.add(h.url);
-                h.kategori = kat;
-                birlesik.push(h);
-              }
-            });
-          }
-        } catch (e) {
-          // bu kategori atlanır, diğerlerine devam edilir
-        }
-      }
-
-      // farklı kategorilerden gelen ogelerin id'leri carpisabilir; birlestirilmis
-      // liste icin yeniden, benzersiz id ata.
-      birlesik.forEach((h, i) => { h.id = String(i); });
-
-      if (birlesik.length === 0) {
-        el.durum.textContent = "Hiçbir kategoride içerik bulunamadı.";
-        bosDurumCiz(el.liste, "İçerik bulunamadı.");
-        return;
-      }
-
-      el.durum.textContent = `${birlesik.length} içerik bulundu (tüm kategoriler). Sınıflandırılıyor...`;
-
-      const { sonuclar, ilkHata } = await topluSiniflandir(birlesik, apiKey, model, (tamam, top) => {
-        el.progress.style.width = `${Math.round((tamam / top) * 100)}%`;
-        el.durum.textContent = `Sınıflandırılıyor... ${tamam}/${top}`;
-      });
-
-      sonuclariUygula(sonuclar);
-
-      if (ilkHata) {
-        el.durum.textContent = "Tamamlandı (bazı gruplar başarısız oldu).";
-        toast(ilkHata, "warn");
-      } else {
-        el.durum.textContent = `Tamamlandı. Toplam ${birlesik.length} içerik, tüm kategoriler (${new Date().toLocaleTimeString("tr-TR")}).`;
-      }
-    } catch (e) {
-      toast("Beklenmeyen hata: " + e, "error");
-      el.durum.textContent = "Hata oluştu.";
-    } finally {
-      state.calisiyor = false;
-      el.btn.disabled = false;
-      el.tumBtn.disabled = false;
-      el.tumBtn.textContent = oncekiTumMetni;
-      ustProgres(false);
-    }
-  }
-
-  chipBaslat();
-  el.btn.addEventListener("click", getir);
-  if (el.tumBtn) el.tumBtn.addEventListener("click", tumKategorileriGetir);
-  el.kaydetBtn.addEventListener("click", () => {
-    indirMarkdown(state.ogeler, cfg.tur === "blog" ? "Finviz Blog Yazıları" : "Finviz Borsa Haberleri", cfg.tur);
   });
-  if (el.gunOzetBtn) {
-    el.gunOzetBtn.addEventListener("click", () => gunuOzetle(state.ogeler, el.model.value));
+
+  kategoriChips.forEach((chip) => {
+    chip.addEventListener("click", () => {
+      state.kategoriFiltre = chip.dataset.kategori;
+      kategoriChips.forEach((c) => c.classList.remove("is-active"));
+      chip.classList.add("is-active");
+      ciz();
+    });
+  });
+
+  tarihChips.forEach((chip) => {
+    chip.addEventListener("click", () => {
+      state.tarihFiltre = chip.dataset.tarih;
+      tarihChips.forEach((c) => c.classList.remove("is-active"));
+      chip.classList.add("is-active");
+      ciz();
+    });
+  });
+
+  arama.addEventListener("input", () => {
+    state.arama = arama.value.trim();
+    ciz();
+  });
+
+  $("haberKaydetBtn").addEventListener("click", () => {
+    indirMarkdown(filtrele(), "Finviz Haberleri", "haberler");
+  });
+
+  $("haberGunOzetBtn").addEventListener("click", gunuOzetle);
+
+  async function yenile(sessiz = false) {
+    if (!sessiz) {
+      ustProgres(true);
+      $("haberYenileBtn").disabled = true;
+    }
+    try {
+      const resp = await fetch("/api/haberler");
+      const yanit = await resp.json();
+      if (!yanit.ok) {
+        if (!sessiz) toast(yanit.hata || "Haberler alınamadı.", "error");
+        return;
+      }
+      state.tumOgeler = yanit.haberler || [];
+      chipSayilariGuncelle();
+      ciz();
+
+      if (yanit.sonTarama) {
+        const tarih = new Date(yanit.sonTarama);
+        $("haberSonTarama").textContent = `Sistem arka planda otomatik olarak Finviz'i tarıyor. Son tarama: ${tarih.toLocaleString("tr-TR")}`;
+      }
+    } catch (e) {
+      if (!sessiz) toast("Beklenmeyen hata: " + e, "error");
+    } finally {
+      if (!sessiz) {
+        ustProgres(false);
+        $("haberYenileBtn").disabled = false;
+      }
+    }
   }
+
+  $("haberYenileBtn").addEventListener("click", () => yenile(false));
+
+  return yenile;
 }
 
 /* ===================== Kaydedilenler paneli ===================== */
@@ -846,26 +740,10 @@ function baslat() {
     if (sekme === "kaydedilenler") kayitliYenile();
   });
 
-  panelOlustur({
-    tur: "haber",
-    prefix: "haber",
-    kategoriId: "haberKategori",
-    kategoriChipsId: "haberKategoriChips",
-    aramaId: "haberArama",
-    tumBtnId: "haberTumBtn",
-    varsayilanBosMesaj: 'Henüz haber yok.<br>"Haberleri Getir ve Sınıflandır" butonuna tıkla.',
-  });
+  const haberYenile = haberPaneliOlustur();
+  haberYenile(false);
 
-  panelOlustur({
-    tur: "blog",
-    prefix: "blog",
-    kategoriId: null,
-    aramaId: "blogArama",
-    varsayilanBosMesaj: 'Henüz blog yazısı yok.<br>"Blogları Getir ve Sınıflandır" butonuna tıkla.',
-  });
-
-  kayitliYenile();
-  durumYukle();
+  setInterval(() => haberYenile(true), OTOMATIK_YENILEME_MS);
 }
 
 baslat();

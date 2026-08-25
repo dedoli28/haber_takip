@@ -159,7 +159,6 @@ select, input[type="text"], input[type="password"] {
 }
 select:focus, input:focus { border-color: var(--accent); }
 select { min-width: 170px; cursor: pointer; }
-#haberGun { min-width: 100px; }
 
 .hint { font-size: 11.5px; color: var(--text-faint); margin: 12px 2px 0; }
 
@@ -272,6 +271,8 @@ html[data-theme="light"] .skeleton-card::after {
   border-radius: var(--radius-lg); box-shadow: var(--shadow-modal);
   padding: 20px 22px 24px;
 }
+.modal-wide { width: 640px; }
+.account-chip-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .modal-head h3 { margin: 0; font-size: 16.5px; }
 .modal-section { padding: 14px 0 4px; }
