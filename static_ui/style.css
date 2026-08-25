@@ -1,3 +1,12 @@
+/* ===================== Font (yerelde barindirilir, Google Fonts kullanilmaz) ===================== */
+@font-face {
+  font-family: "Inter";
+  src: url("fonts/Inter-Variable.woff2") format("woff2-variations"), url("fonts/Inter-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ===================== Tokens ===================== */
 :root {
   --bg: #0b0d12;
@@ -21,7 +30,7 @@
   --radius-lg: 14px;
   --radius-md: 10px;
   --radius-sm: 7px;
-  --font: "Segoe UI", -apple-system, "Inter", system-ui, sans-serif;
+  --font: "Inter", "Segoe UI", -apple-system, system-ui, sans-serif;
   color-scheme: dark;
 }
 
@@ -310,8 +319,25 @@ html[data-theme="light"] .skeleton-card::after {
 .esik-input-field label { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: var(--text-faint); text-transform: uppercase; }
 .esik-input-field input { width: 100%; }
 .esik-input-field input[type="number"]:disabled { opacity: .4; cursor: not-allowed; }
-.esik-aktif-toggle { display: flex !important; flex-direction: row !important; align-items: center; gap: 5px; cursor: pointer; text-transform: none !important; }
-.esik-aktif-toggle input { cursor: pointer; width: auto !important; min-height: 0 !important; }
+.esik-aktif-toggle { display: flex !important; flex-direction: row !important; align-items: center; gap: 7px; cursor: pointer; text-transform: none !important; }
+
+/* Mini toggle switch (uiverse.io/alexruix/silent-otter-72 temasina gore uyarlandi, MIT) */
+.mini-switch { position: relative; display: inline-block; width: 30px; height: 17px; flex-shrink: 0; }
+.mini-switch input { position: absolute; opacity: 0; width: 0; height: 0; margin: 0; }
+.mini-switch .slider {
+  position: absolute; inset: 0; cursor: pointer;
+  background: var(--border); border: 1px solid var(--border);
+  border-radius: 999px; transition: background-color .2s ease, border-color .2s ease;
+}
+.mini-switch .slider::before {
+  content: ""; position: absolute; left: 1px; top: 1px;
+  width: 13px; height: 13px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.35);
+  transition: transform .2s cubic-bezier(.4,0,.2,1);
+}
+.mini-switch input:checked + .slider { background: var(--accent); border-color: var(--accent); }
+.mini-switch input:checked + .slider::before { transform: translateX(13px); }
+.mini-switch input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .alici-esik-satir { background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: var(--radius-md); padding: 10px 12px; }
 .alici-esik-bas { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -383,3 +409,41 @@ html[data-theme="light"] .skeleton-card::after {
 .toast.toast-warn { border-left: 3px solid #f59e0b; }
 .toast.toast-ok { border-left: 3px solid #22c55e; }
 @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* ===================== Mobil ===================== */
+@media (max-width: 640px) {
+  .app-header { padding: 0 12px; gap: 10px; }
+  .brand-name { display: none; }
+  .tabs { padding: 3px; gap: 2px; }
+  .tab-btn { padding: 7px 11px; font-size: 12.5px; }
+  .header-actions { gap: 4px; }
+  .header-actions .btn-label { display: none; }
+  .header-actions .btn { padding: 8px 10px; }
+
+  .app-main { padding: 10px 10px 24px; }
+
+  .control-panel-compact { padding: 10px; }
+  .control-row { gap: 6px; }
+  .field-grow { flex-basis: 100%; }
+
+  .filter-popover { width: calc(100vw - 40px); left: 0; right: auto; }
+
+  .modal, .modal-wide { width: 100%; max-width: 100%; max-height: 100dvh; height: 100%;
+    border-radius: 0; padding: 16px 16px 20px; }
+  .modal-overlay { padding: 0; }
+  .modal-overlay.is-open { align-items: stretch; justify-content: stretch; }
+
+  .esik-input-row { flex-direction: column; }
+  .esik-input-field { min-width: 0; }
+
+  .item-card { padding: 10px 12px; gap: 10px; }
+  .item-title { font-size: 13.5px; }
+
+  .toast-stack { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+
+  .detail-actions { flex-direction: column; }
+}
+
+@media (max-width: 380px) {
+  .tab-btn { padding: 6px 8px; font-size: 11.5px; }
+}

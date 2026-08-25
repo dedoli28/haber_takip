@@ -196,11 +196,19 @@ function esikInputSatiriOlustur(deger) {
 
     const lbl = document.createElement("label");
     lbl.className = "esik-aktif-toggle";
+
+    const miniSwitch = document.createElement("span");
+    miniSwitch.className = "mini-switch";
     const aktifCB = document.createElement("input");
     aktifCB.type = "checkbox";
     aktifCB.checked = deger[sinif].aktif !== false;
     aktifCB.dataset.sinifAktif = sinif;
-    lbl.appendChild(aktifCB);
+    const slider = document.createElement("span");
+    slider.className = "slider";
+    miniSwitch.appendChild(aktifCB);
+    miniSwitch.appendChild(slider);
+    lbl.appendChild(miniSwitch);
+
     lbl.appendChild(document.createTextNode(" " + etiket));
     alan.appendChild(lbl);
 
