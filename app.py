@@ -136,7 +136,7 @@ def test_eposta():
         return JSONResponse({"ok": False, "hata": "Önce Ayarlar'a en az bir bildirim e-postası ekleyin."}, status_code=400)
 
     if not email_client.yapilandirilmis_mi():
-        return JSONResponse({"ok": False, "hata": "Sunucuda RESEND_API_KEY tanımlı değil."}, status_code=500)
+        return JSONResponse({"ok": False, "hata": "Sunucuda GMAIL_ADDRESS / GMAIL_APP_PASSWORD tanımlı değil."}, status_code=500)
 
     try:
         son = redis_store.son_test_epostasi_yukle()
@@ -347,7 +347,7 @@ def _tara_calistir() -> dict:
         elif not aliciler:
             pass  # bildirim e-postasi tanimli degil, sessizce atla
         elif not email_client.yapilandirilmis_mi():
-            siniflandirma_hatalari.append("RESEND_API_KEY tanımlı değil, e-posta gönderilemedi.")
+            siniflandirma_hatalari.append("GMAIL_ADDRESS / GMAIL_APP_PASSWORD tanımlı değil, e-posta gönderilemedi.")
 
     try:
         redis_store.sayaclari_kaydet(bekleyenler)
