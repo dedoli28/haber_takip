@@ -4,7 +4,6 @@
 const KAYDEDILEN_KEY = "kaydedilen_haberler_v1";
 const OTOMATIK_YENILEME_MS = 60 * 1000; // arka plandaki gercek tarama sunucuda (cron) calisir; burada sadece depoyu tazeleriz
 
-const SINIF_SIRA = ["cok_onemli", "onemli", "bakmaya_deger", "onemsiz"];
 const SINIF_ETIKET = {
   cok_onemli: "Çok Önemli",
   onemli: "Önemli",
@@ -226,18 +225,6 @@ function esikOzetMetni(esik) {
   }).join(", ");
 }
 
-function ortakEsikInputlariniDoldur() {
-  $("ortakAktifCokOnemli").checked = mevcutAyarlar.ortak_esik.cok_onemli.aktif !== false;
-  $("ortakEsikCokOnemli").value = mevcutAyarlar.ortak_esik.cok_onemli.esik;
-  $("ortakEsikCokOnemli").disabled = !$("ortakAktifCokOnemli").checked;
-  $("ortakAktifOnemli").checked = mevcutAyarlar.ortak_esik.onemli.aktif !== false;
-  $("ortakEsikOnemli").value = mevcutAyarlar.ortak_esik.onemli.esik;
-  $("ortakEsikOnemli").disabled = !$("ortakAktifOnemli").checked;
-  $("ortakAktifBakmayaDeger").checked = mevcutAyarlar.ortak_esik.bakmaya_deger.aktif !== false;
-  $("ortakEsikBakmayaDeger").value = mevcutAyarlar.ortak_esik.bakmaya_deger.esik;
-  $("ortakEsikBakmayaDeger").disabled = !$("ortakAktifBakmayaDeger").checked;
-}
-
 function aliciListesiCiz() {
   const kutu = $("epostaListesi");
   kutu.innerHTML = "";
@@ -336,14 +323,7 @@ async function ayarlarYukle() {
       alicilar: yanit.ayarlar.alicilar || [],
     };
 
-    ortakEsikInputlariniDoldur();
     aliciListesiCiz();
-
-    if (yanit.ayarlar.sonTestEpostasi) {
-      const bitis = new Date(yanit.ayarlar.sonTestEpostasi).getTime() + TEST_EPOSTA_BEKLEME_MS;
-      testEpostaBekleyenBitis = Math.max(testEpostaBekleyenBitis, bitis);
-    }
-    testEpostaDurumGuncelle();
   } catch (e) {
     toast("Ayarlar alınamadı: " + e, "error");
   }
@@ -359,7 +339,6 @@ async function ayarlariKaydet(basariMesaji) {
     const yanit = await resp.json();
     if (yanit.ok) {
       mevcutAyarlar = yanit.ayarlar;
-      ortakEsikInputlariniDoldur();
       aliciListesiCiz();
       if (basariMesaji) toast(basariMesaji, "ok");
     } else {
@@ -374,74 +353,12 @@ function epostaGecerliMi(eposta) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(eposta);
 }
 
-/* ===================== Deneme e-postası (iki adımlı onay + 10 dk bekleme) ===================== */
-const TEST_EPOSTA_BEKLEME_MS = 10 * 60 * 1000;
-let testEpostaBekleyenBitis = 0;
-
-function testEpostaDurumGuncelle() {
-  const simdi = Date.now();
-  const btn = $("testEpostaBtn");
-  const durum = $("testEpostaDurum");
-  if (testEpostaBekleyenBitis > simdi) {
-    btn.disabled = true;
-    const kalanDk = Math.ceil((testEpostaBekleyenBitis - simdi) / 60000);
-    durum.textContent = `Tekrar göndermek için ${kalanDk} dakika bekleyin.`;
-    durum.style.display = "block";
-  } else {
-    btn.disabled = false;
-    durum.style.display = "none";
-  }
-}
-
-function testEpostaBaslat() {
-  $("testEpostaBtn").addEventListener("click", () => {
-    if ($("testEpostaBtn").disabled) return;
-    $("testEpostaBtn").style.display = "none";
-    $("testEpostaOnay").style.display = "block";
-  });
-
-  $("testEpostaVazgecBtn").addEventListener("click", () => {
-    $("testEpostaOnay").style.display = "none";
-    $("testEpostaBtn").style.display = "inline-flex";
-  });
-
-  $("testEpostaIlerleBtn").addEventListener("click", async () => {
-    const ilerleBtn = $("testEpostaIlerleBtn");
-    ilerleBtn.disabled = true;
-    ilerleBtn.textContent = "Gönderiliyor...";
-
-    try {
-      const resp = await fetch("/api/test-eposta", { method: "POST" });
-      const yanit = await resp.json();
-      if (yanit.ok) {
-        toast(`Deneme e-postası ${yanit.gonderilenSayisi} adrese gönderildi.`, "ok");
-        testEpostaBekleyenBitis = Date.now() + TEST_EPOSTA_BEKLEME_MS;
-      } else {
-        toast(yanit.hata || "Deneme e-postası gönderilemedi.", "error");
-        if (yanit.kalanSaniye) testEpostaBekleyenBitis = Date.now() + yanit.kalanSaniye * 1000;
-      }
-    } catch (e) {
-      toast("Beklenmeyen hata: " + e, "error");
-    } finally {
-      ilerleBtn.disabled = false;
-      ilerleBtn.textContent = "İlerle";
-      $("testEpostaOnay").style.display = "none";
-      $("testEpostaBtn").style.display = "inline-flex";
-      testEpostaDurumGuncelle();
-    }
-  });
-}
-
 function ayarlarBaslat() {
   $("openSettings").addEventListener("click", () => {
     $("settingsOverlay").classList.add("is-open");
     ayarlarYukle();
   });
   $("closeSettings").addEventListener("click", () => $("settingsOverlay").classList.remove("is-open"));
-
-  $("ortakAktifCokOnemli").addEventListener("change", () => { $("ortakEsikCokOnemli").disabled = !$("ortakAktifCokOnemli").checked; });
-  $("ortakAktifOnemli").addEventListener("change", () => { $("ortakEsikOnemli").disabled = !$("ortakAktifOnemli").checked; });
-  $("ortakAktifBakmayaDeger").addEventListener("change", () => { $("ortakEsikBakmayaDeger").disabled = !$("ortakAktifBakmayaDeger").checked; });
   $("settingsOverlay").addEventListener("click", (e) => {
     if (e.target === $("settingsOverlay")) $("settingsOverlay").classList.remove("is-open");
   });
@@ -463,25 +380,6 @@ function ayarlarBaslat() {
     if (e.key === "Enter") epostaEkle();
   });
 
-  $("ortakEsikKaydetBtn").addEventListener("click", () => {
-    mevcutAyarlar.ortak_esik = {
-      cok_onemli: {
-        aktif: $("ortakAktifCokOnemli").checked,
-        esik: Math.max(1, parseInt($("ortakEsikCokOnemli").value, 10) || VARSAYILAN_ORTAK_ESIK.cok_onemli.esik),
-      },
-      onemli: {
-        aktif: $("ortakAktifOnemli").checked,
-        esik: Math.max(1, parseInt($("ortakEsikOnemli").value, 10) || VARSAYILAN_ORTAK_ESIK.onemli.esik),
-      },
-      bakmaya_deger: {
-        aktif: $("ortakAktifBakmayaDeger").checked,
-        esik: Math.max(1, parseInt($("ortakEsikBakmayaDeger").value, 10) || VARSAYILAN_ORTAK_ESIK.bakmaya_deger.esik),
-      },
-    };
-    ayarlariKaydet("Ortak eşik güncellendi.");
-  });
-
-  testEpostaBaslat();
 }
 
 /* ===================== Kaydedilenler (localStorage) ===================== */
@@ -508,38 +406,6 @@ function kaydedilenEkleGuncelle(oge) {
 }
 function kaydedilenKaldir(url) {
   kaydedilenleriKaydet(kaydedilenleriYukle().filter((o) => o.url !== url));
-}
-
-/* ===================== Markdown indirme (ortak) ===================== */
-function indirMarkdown(ogeler, baslikMetni, dosyaOnEki) {
-  if (ogeler.length === 0) return;
-  const bugun = bugununTarihi();
-  const satirlar = [`# ${baslikMetni} - ${bugun}`, ""];
-
-  SINIF_SIRA.forEach((sinif) => {
-    const grup = ogeler.filter((h) => h.sinif === sinif);
-    if (grup.length === 0) return;
-    satirlar.push(`## ${SINIF_ETIKET[sinif]} (${grup.length})`);
-    satirlar.push("");
-    grup.forEach((h) => {
-      const baslikGoster = h.baslikTr || h.baslik;
-      const ozetStr = h.ai_ozet ? ` — _${h.ai_ozet}_` : "";
-      const analizStr = h.analiz ? `\n  - **Analiz:** ${h.analiz}` : "";
-      satirlar.push(`- **[${h.saat}] [${baslikGoster}](${h.url})** (${h.kaynak})${ozetStr}${analizStr}`);
-    });
-    satirlar.push("");
-  });
-
-  const blob = new Blob([satirlar.join("\n")], { type: "text/markdown;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${dosyaOnEki}_${bugun}.md`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  toast("Markdown dosyası indirildi.", "ok");
 }
 
 /* ===================== Detay modal (haber/kayıtlı ortak) ===================== */
@@ -831,7 +697,6 @@ function haberPaneliOlustur() {
     kutu.innerHTML = "";
     const gorulen = filtrele();
 
-    $("haberKaydetBtn").disabled = state.tumOgeler.length === 0;
     $("haberGunOzetBtn").disabled = state.tumOgeler.length === 0;
 
     if (gorulen.length === 0) {
@@ -839,7 +704,7 @@ function haberPaneliOlustur() {
         "haberListe",
         state.tumOgeler.length
           ? "Seçilen filtre/aramayla eşleşen içerik yok."
-          : 'Henüz haber yok. Arka plan taraması ilk sonuçları getirdiğinde burada görünecek.<br>"Şimdi Tara" ya da "Yenile"ye basarak da kontrol edebilirsin.'
+          : 'Henüz haber yok. Arka plan taraması ilk sonuçları getirdiğinde burada görünecek.<br>"Yenile"ye basarak da kontrol edebilirsin.'
       );
       return;
     }
@@ -849,10 +714,6 @@ function haberPaneliOlustur() {
   arama.addEventListener("input", () => {
     state.arama = arama.value.trim();
     ciz();
-  });
-
-  $("haberKaydetBtn").addEventListener("click", () => {
-    indirMarkdown(filtrele(), "Finviz Haberleri", "haberler");
   });
 
   $("haberGunOzetBtn").addEventListener("click", gunuOzetle);
@@ -916,8 +777,6 @@ function kayitliPaneliOlustur() {
     const kutu = $("kayitliListe");
     kutu.innerHTML = "";
 
-    $("kayitliKaydetBtn").disabled = liste.length === 0;
-
     let gorulen = liste;
     if (sinif.secili.size > 0) gorulen = gorulen.filter((h) => sinif.secili.has(h.sinif));
     if (kategori.secili.size > 0) gorulen = gorulen.filter((h) => kategori.secili.has(h.kategori));
@@ -956,10 +815,6 @@ function kayitliPaneliOlustur() {
     kaydedilenleriKaydet([]);
     ciz();
     toast("Tüm kayıtlar silindi.", "ok");
-  });
-
-  $("kayitliKaydetBtn").addEventListener("click", () => {
-    indirMarkdown(kaydedilenleriYukle(), "Kaydedilen Haberler", "kaydedilenler");
   });
 
   return ciz;

@@ -87,7 +87,6 @@
           <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18 3v4h-4M6 21v-4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Yenile
         </button>
-        <button class="btn btn-outline btn-sm" id="haberKaydetBtn" disabled>Markdown</button>
         <button class="btn btn-primary btn-sm" id="haberGunOzetBtn" disabled>Günü Özetle</button>
       </div>
       <p class="hint" id="haberSonTarama">Sistem arka planda otomatik olarak Finviz'i tarıyor. Son tarama: —</p>
@@ -143,7 +142,6 @@
         </div>
 
         <div class="field-spacer"></div>
-        <button class="btn btn-outline btn-sm" id="kayitliKaydetBtn" disabled>Markdown</button>
         <button class="btn btn-outline btn-sm" id="kayitliTemizleBtn">Tümünü Temizle</button>
       </div>
       <p class="hint">Kaydettiğin haber/blogların özeti, önem seviyesi ve (varsa) analizi burada saklanır — arka plan taraması bunları temizlemez.</p>
@@ -171,47 +169,13 @@
 
     <div class="modal-section">
       <div class="modal-section-title">Bildirim E-postaları</div>
-      <p class="modal-hint">Her e-posta adresi, önemli haber biriktiğinde bildirim almak için kendi eşik sayılarını kullanabilir — ya da aşağıdaki ortak (varsayılan) eşiği kullanabilir.</p>
-
-      <div class="esik-ortak-blok">
-        <div class="filter-popover-title">Ortak Eşik (Varsayılan)</div>
-        <p class="modal-hint" style="margin:0 0 10px;">Bir sınıfın kutusunu kapatırsanız, o önem derecesi için hiç e-posta gönderilmez.</p>
-        <div class="esik-input-row">
-          <div class="esik-input-field">
-            <label class="esik-aktif-toggle"><input type="checkbox" id="ortakAktifCokOnemli" checked> Çok Önemli</label>
-            <input type="number" min="1" id="ortakEsikCokOnemli">
-          </div>
-          <div class="esik-input-field">
-            <label class="esik-aktif-toggle"><input type="checkbox" id="ortakAktifOnemli" checked> Önemli</label>
-            <input type="number" min="1" id="ortakEsikOnemli">
-          </div>
-          <div class="esik-input-field">
-            <label class="esik-aktif-toggle"><input type="checkbox" id="ortakAktifBakmayaDeger" checked> Bakmaya Değer</label>
-            <input type="number" min="1" id="ortakEsikBakmayaDeger">
-          </div>
-        </div>
-        <button class="btn btn-outline btn-sm" id="ortakEsikKaydetBtn" style="margin-top:10px;">Ortak Eşiği Kaydet</button>
-      </div>
-
-      <div class="modal-divider" style="margin:16px 0;"></div>
+      <p class="modal-hint">Her e-posta adresi, önemli haber biriktiğinde bildirim almak için varsayılan eşiği kullanır — isterseniz kendi özel eşik sayılarını da tanımlayabilir.</p>
 
       <div class="key-row">
         <input type="text" id="epostaInput" placeholder="ornek@eposta.com">
         <button class="btn btn-primary btn-sm" id="epostaEkleBtn">Ekle</button>
       </div>
       <div id="epostaListesi" style="margin-top:12px; display:flex; flex-direction:column; gap:10px;"></div>
-
-      <div class="modal-divider" style="margin:16px 0;"></div>
-
-      <button class="btn btn-outline btn-sm" id="testEpostaBtn">Deneme E-postası Gönder</button>
-      <div id="testEpostaOnay" style="display:none; margin-top:10px;">
-        <p class="modal-hint" style="margin:0 0 8px;">Listedeki tüm e-postalara bir deneme e-postası gönderilecek. Devam edilsin mi?</p>
-        <div style="display:flex; gap:8px;">
-          <button class="btn btn-primary btn-sm" id="testEpostaIlerleBtn">İlerle</button>
-          <button class="btn btn-ghost btn-sm" id="testEpostaVazgecBtn">Vazgeç</button>
-        </div>
-      </div>
-      <p class="key-status-line" id="testEpostaDurum" style="display:none;"></p>
     </div>
   </div>
 </div>
