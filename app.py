@@ -277,17 +277,29 @@ def _siniflandir_grup(grup: list[dict], api_key: str) -> str | None:
     return None
 
 
+EPOSTA_SINIF_BASINA_AZAMI = 20
+
+
 def _esik_email_html(tetiklenen: dict[str, list[str]], depo: dict) -> str:
+    """E-posta govdesini olusturur. Bekleyen liste cok uzunsa (ör. gecmis bir
+    gonderim hatasi yuzunden birikmisse) e-postanin devasa buyup zaman
+    asimina/gonderim hatasina yol acmamasi icin sinif basina yalnizca en son
+    EPOSTA_SINIF_BASINA_AZAMI haber gosterilir, kalani ozetlenir."""
     parcalar = ["<h2>Haber Takip Platformu</h2><p>Aşağıdaki önem eşikleri aşıldı:</p>"]
     for sinif, urller in tetiklenen.items():
+        gosterilen = urller[-EPOSTA_SINIF_BASINA_AZAMI:]
+        gizli_sayisi = len(urller) - len(gosterilen)
+
         parcalar.append(f"<h3>{SINIF_ETIKET_TR.get(sinif, sinif)} ({len(urller)} yeni haber)</h3><ul>")
-        for url in urller:
+        for url in gosterilen:
             o = depo.get(url)
             if not o:
                 continue
             baslik = o.get("baslikTr") or o.get("baslik")
             ozet = o.get("ai_ozet", "")
             parcalar.append(f'<li><a href="{url}">{baslik}</a><br><small>{ozet}</small></li>')
+        if gizli_sayisi > 0:
+            parcalar.append(f"<li><em>+ {gizli_sayisi} haber daha (uygulamadan görüntüleyebilirsiniz)</em></li>")
         parcalar.append("</ul>")
     return "\n".join(parcalar)
 
