@@ -218,13 +218,6 @@ function esikInputSatiriOlustur(deger) {
   return satir;
 }
 
-function esikOzetMetni(esik) {
-  return SINIF_ESIK_SIRA.map(([sinif, etiket]) => {
-    const veri = esik[sinif];
-    return `${etiket}: ${veri.aktif !== false ? veri.esik : "Kapalı"}`;
-  }).join(", ");
-}
-
 function aliciListesiCiz() {
   const kutu = $("epostaListesi");
   kutu.innerHTML = "";
@@ -250,15 +243,6 @@ function aliciListesiCiz() {
     adres.textContent = alici.eposta;
     bas.appendChild(adres);
 
-    const ozelLabel = document.createElement("label");
-    ozelLabel.className = "ozel-esik-toggle";
-    const ozelCheckbox = document.createElement("input");
-    ozelCheckbox.type = "checkbox";
-    ozelCheckbox.checked = !!alici.esik;
-    ozelLabel.appendChild(ozelCheckbox);
-    ozelLabel.appendChild(document.createTextNode(" Özel eşik"));
-    bas.appendChild(ozelLabel);
-
     const silBtn = document.createElement("span");
     silBtn.className = "alici-sil-btn";
     silBtn.textContent = "✕";
@@ -272,41 +256,18 @@ function aliciListesiCiz() {
     satir.appendChild(bas);
 
     const girdiSatiri = esikInputSatiriOlustur(alici.esik || mevcutAyarlar.ortak_esik);
-    girdiSatiri.style.display = alici.esik ? "flex" : "none";
     girdiSatiri.style.marginTop = "10px";
     satir.appendChild(girdiSatiri);
-
-    const ortakBilgi = document.createElement("p");
-    ortakBilgi.className = "modal-hint";
-    ortakBilgi.style.margin = "8px 0 0";
-    ortakBilgi.style.display = alici.esik ? "none" : "block";
-    ortakBilgi.textContent = `Ortak ayarı kullanıyor: ${esikOzetMetni(mevcutAyarlar.ortak_esik)}`;
-    satir.appendChild(ortakBilgi);
 
     const kaydetBtn = document.createElement("button");
     kaydetBtn.className = "btn btn-outline btn-sm";
     kaydetBtn.style.marginTop = "8px";
-    kaydetBtn.style.display = alici.esik ? "inline-flex" : "none";
     kaydetBtn.textContent = "Kaydet";
     kaydetBtn.addEventListener("click", () => {
       mevcutAyarlar.alicilar[index].esik = esikGirdileriniOku(girdiSatiri);
       ayarlariKaydet("Eşik güncellendi.");
     });
     satir.appendChild(kaydetBtn);
-
-    ozelCheckbox.addEventListener("change", () => {
-      if (ozelCheckbox.checked) {
-        girdiSatiri.style.display = "flex";
-        kaydetBtn.style.display = "inline-flex";
-        ortakBilgi.style.display = "none";
-      } else {
-        girdiSatiri.style.display = "none";
-        kaydetBtn.style.display = "none";
-        ortakBilgi.style.display = "block";
-        mevcutAyarlar.alicilar[index].esik = null;
-        ayarlariKaydet("Ortak ayara geçildi.");
-      }
-    });
 
     kutu.appendChild(satir);
   });
