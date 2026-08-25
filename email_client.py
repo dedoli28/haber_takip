@@ -27,6 +27,11 @@ def yapilandirilmis_mi() -> bool:
 
 
 def eposta_gonder(aliciler: list[str], konu: str, html_govde: str) -> None:
+    """Her aliciya AYRI AYRI gonderir: gecersiz/reddedilen tek bir adres
+    (ornegin SMTP'nin kabul etmedigi bir karakter iceren bir e-posta),
+    digerlerinin de gonderilmesini engellemesin diye. En az bir alicaya
+    basariyla ulasilirsa hata firlatilmaz; hicbirine ulasilamazsa hepsinin
+    hatasini birlestiren bir RuntimeError firlatilir."""
     adres = os.environ.get("GMAIL_ADDRESS", "").strip()
     sifre = os.environ.get("GMAIL_APP_PASSWORD", "").replace(" ", "")
     if not adres or not sifre:
@@ -34,16 +39,26 @@ def eposta_gonder(aliciler: list[str], konu: str, html_govde: str) -> None:
     if not aliciler:
         return
 
-    mesaj = MIMEMultipart("alternative")
-    mesaj["Subject"] = konu
-    mesaj["From"] = f"Haber Takip Platformu <{adres}>"
-    mesaj["To"] = ", ".join(aliciler)
-    mesaj.attach(MIMEText(html_govde, "html", "utf-8"))
+    basarili: list[str] = []
+    hatalar: list[str] = []
 
     try:
         with smtplib.SMTP(SMTP_SUNUCU, SMTP_PORT, timeout=20) as sunucu:
             sunucu.starttls()
             sunucu.login(adres, sifre)
-            sunucu.sendmail(adres, aliciler, mesaj.as_string())
+            for alici in aliciler:
+                mesaj = MIMEMultipart("alternative")
+                mesaj["Subject"] = konu
+                mesaj["From"] = f"Haber Takip Platformu <{adres}>"
+                mesaj["To"] = alici
+                mesaj.attach(MIMEText(html_govde, "html", "utf-8"))
+                try:
+                    sunucu.sendmail(adres, [alici], mesaj.as_string())
+                    basarili.append(alici)
+                except Exception as e:  # noqa: BLE001
+                    hatalar.append(f"{alici}: {e}")
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"Gmail SMTP hatası: {e}") from e
+
+    if not basarili:
+        raise RuntimeError("Hiçbir adrese gönderilemedi: " + "; ".join(hatalar))

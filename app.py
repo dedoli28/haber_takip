@@ -114,6 +114,7 @@ def durum():
         "bildirimEpostalari": ayarlar.get("bildirim_epostalari", []),
         "epostaYapilandirilmisMi": email_client.yapilandirilmis_mi(),
         "sonTarama": redis_store.son_tarama_yukle(),
+        "sonHatalar": redis_store.son_hatalar_yukle(),
     }
 
 
@@ -386,6 +387,11 @@ def _tara_calistir() -> dict:
         redis_store.sayaclari_kaydet(bekleyenler)
     except Exception as e:  # noqa: BLE001
         siniflandirma_hatalari.append(str(e))
+
+    try:
+        redis_store.son_hatalar_kaydet(tarama_hatalari + siniflandirma_hatalari)
+    except Exception:  # noqa: BLE001
+        pass  # tanilama amacli, taramayi basarisiz saymaya degmez
 
     return {
         "ok": True,
