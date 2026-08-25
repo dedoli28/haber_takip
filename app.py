@@ -96,6 +96,27 @@ def haberler():
     return {"ok": True, "haberler": ogeler, "sonTarama": redis_store.son_tarama_yukle()}
 
 
+@app.get("/api/durum")
+def durum():
+    """E-posta bildirim mekanizmasini teshis etmek icin: eslik sayaclarinin
+    (bekleyen, henuz mail atilmamis haber sayisi) o anki durumunu, esikleri
+    ve e-posta yapilandirmasinin sunucuda tanimli olup olmadigini gosterir."""
+    try:
+        bekleyenler = redis_store.sayaclari_yukle()
+        ayarlar = redis_store.ayarlar_yukle()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    return {
+        "ok": True,
+        "esikler": ESIKLER,
+        "bekleyenSayilar": {s: len(u) for s, u in bekleyenler.items()},
+        "bildirimEpostalari": ayarlar.get("bildirim_epostalari", []),
+        "epostaYapilandirilmisMi": email_client.yapilandirilmis_mi(),
+        "sonTarama": redis_store.son_tarama_yukle(),
+    }
+
+
 @app.get("/api/ayarlar")
 def ayarlar_getir():
     try:
