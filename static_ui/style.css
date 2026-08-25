@@ -98,12 +98,6 @@ button, input, select { font-family: inherit; font-size: inherit; color: inherit
   border-bottom: 1px solid var(--border-soft);
 }
 .brand { display: flex; align-items: center; gap: 10px; }
-.brand-mark {
-  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, var(--accent), #7c5cff);
-  box-shadow: 0 3px 10px rgba(79,124,255,.4), inset 0 1px 0 rgba(255,255,255,.18);
-}
 .brand-name {
   font-weight: 800; font-size: 15.5px; letter-spacing: -.01em; color: var(--text);
 }
