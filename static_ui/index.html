@@ -12,10 +12,15 @@
 
 <header class="app-header">
   <div class="brand">
-    <span class="brand-dot"></span>
+    <span class="brand-mark">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M3 13h3.2l2.3-7 4.4 15 2.3-8H21" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
     <span class="brand-name">Haber Takip Platformu</span>
   </div>
   <nav class="tabs" id="tabNav">
+    <span class="tabs-thumb" id="tabsThumb"></span>
     <button class="tab-btn is-active" data-tab="haberler">Haberler</button>
     <button class="tab-btn" data-tab="kaydedilenler">Kaydedilenler</button>
   </nav>

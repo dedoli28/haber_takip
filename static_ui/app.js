@@ -74,6 +74,14 @@ function temaUygula(tema) {
 }
 
 /* ===================== Sekmeler ===================== */
+function tabsThumbGuncelle() {
+  const aktifBtn = document.querySelector(".tab-btn.is-active");
+  const thumb = $("tabsThumb");
+  if (!aktifBtn || !thumb) return;
+  thumb.style.width = `${aktifBtn.offsetWidth}px`;
+  thumb.style.transform = `translateX(${aktifBtn.offsetLeft}px)`;
+}
+
 function sekmeBaslat(sekmeDegistiCallback) {
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -81,9 +89,13 @@ function sekmeBaslat(sekmeDegistiCallback) {
       document.querySelectorAll(".view").forEach((v) => v.classList.remove("is-active"));
       btn.classList.add("is-active");
       $(`view-${btn.dataset.tab}`).classList.add("is-active");
+      tabsThumbGuncelle();
       if (sekmeDegistiCallback) sekmeDegistiCallback(btn.dataset.tab);
     });
   });
+
+  tabsThumbGuncelle();
+  window.addEventListener("resize", tabsThumbGuncelle);
 }
 
 /* ===================== Çoklu / tekli seçim çip grupları ===================== */

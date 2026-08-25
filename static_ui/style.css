@@ -97,20 +97,32 @@ button, input, select { font-family: inherit; font-size: inherit; color: inherit
   background: var(--bg-header);
   border-bottom: 1px solid var(--border-soft);
 }
-.brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 15.5px; }
-.brand-dot {
-  width: 9px; height: 9px; border-radius: 50%;
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-mark {
+  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
   background: linear-gradient(135deg, var(--accent), #7c5cff);
-  box-shadow: 0 0 10px var(--accent);
+  box-shadow: 0 3px 10px rgba(79,124,255,.4), inset 0 1px 0 rgba(255,255,255,.18);
 }
-.tabs { display: flex; gap: 4px; background: var(--bg-input); padding: 4px; border-radius: 10px; }
+.brand-name {
+  font-weight: 800; font-size: 15.5px; letter-spacing: -.01em; color: var(--text);
+}
+.tabs { position: relative; display: flex; gap: 4px; background: var(--bg-input); padding: 4px; border-radius: 10px; }
+.tabs-thumb {
+  position: absolute; top: 4px; left: 0; bottom: 4px; width: 0;
+  background: var(--bg-card); border-radius: 7px; box-shadow: var(--shadow-card);
+  transition: transform .4s cubic-bezier(.34,1.56,.64,1), width .4s cubic-bezier(.34,1.56,.64,1);
+  z-index: 0;
+}
 .tab-btn {
+  position: relative; z-index: 1;
   border: none; background: transparent; color: var(--text-muted);
   padding: 7px 16px; border-radius: 7px; cursor: pointer;
-  font-weight: 600; font-size: 13px; transition: all .15s ease;
+  font-weight: 600; font-size: 13px; transition: color .15s ease, transform .12s ease;
 }
 .tab-btn:hover { color: var(--text); }
-.tab-btn.is-active { background: var(--bg-card); color: var(--text); box-shadow: var(--shadow-card); }
+.tab-btn:active { transform: scale(.95); }
+.tab-btn.is-active { color: var(--text); }
 .header-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
 .icon-btn {
@@ -119,6 +131,7 @@ button, input, select { font-family: inherit; font-size: inherit; color: inherit
   color: var(--text-muted); cursor: pointer; transition: all .15s ease;
 }
 .icon-btn:hover { background: var(--bg-input); color: var(--text); }
+.icon-btn:active { transform: scale(.9); }
 
 .btn {
   display: inline-flex; align-items: center; gap: 7px;
@@ -126,6 +139,7 @@ button, input, select { font-family: inherit; font-size: inherit; color: inherit
   padding: 8px 15px; font-weight: 600; font-size: 13px;
   transition: all .15s ease; white-space: nowrap;
 }
+.btn:active:not(:disabled) { transform: scale(.96); }
 .btn-icon { flex-shrink: 0; }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); }
@@ -201,10 +215,13 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
   cursor: pointer; transition: all .15s ease;
 }
 .chip:hover { border-color: var(--chip-c, var(--accent)); }
+.chip:active { transform: scale(.93); }
 .chip.is-active {
   background: var(--chip-c, var(--accent)); border-color: var(--chip-c, var(--accent)); color: #fff;
+  animation: chipPop .28s cubic-bezier(.34,1.56,.64,1);
 }
 .chip-all.is-active { background: var(--accent); border-color: var(--accent); }
+@keyframes chipPop { 0% { transform: scale(.9); } 60% { transform: scale(1.06); } 100% { transform: scale(1); } }
 .chip-row-tight { margin-bottom: 0; gap: 6px; }
 
 /* ===================== Filtreler popover ===================== */
@@ -220,9 +237,10 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
   width: 340px; max-width: 86vw; max-height: 70vh; overflow-y: auto;
   background: var(--bg-panel); border: 1px solid var(--border);
   border-radius: var(--radius-md); box-shadow: var(--shadow-modal);
-  padding: 14px;
+  padding: 14px; transform-origin: top left;
 }
-.filter-popover.is-open { display: block; animation: fadeIn .15s ease; }
+.filter-popover.is-open { display: block; animation: popoverIn .22s cubic-bezier(.34,1.56,.64,1) backwards; }
+@keyframes popoverIn { from { opacity: 0; transform: translateY(-6px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .filter-popover-section + .filter-popover-section { margin-top: 14px; }
 .filter-popover-title {
   font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
@@ -305,13 +323,16 @@ html[data-theme="light"] .skeleton-card::after {
   display: none; align-items: center; justify-content: center; z-index: 500;
   backdrop-filter: blur(3px);
 }
-.modal-overlay.is-open { display: flex; animation: fadeIn .18s ease; }
+.modal-overlay.is-open { display: flex; animation: overlayIn .22s ease; }
+@keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
 .modal {
   width: 460px; max-width: 92vw; max-height: 86vh; overflow-y: auto;
   background: var(--bg-panel); border: 1px solid var(--border);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-modal);
   padding: 20px 22px 24px;
+  animation: modalPop .32s cubic-bezier(.34,1.56,.64,1) backwards;
 }
+@keyframes modalPop { from { opacity: 0; transform: scale(.93) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 .modal-wide { width: 640px; }
 .account-chip-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
