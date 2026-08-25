@@ -161,7 +161,7 @@
 
 <!-- ===================== AYARLAR MODAL ===================== -->
 <div class="modal-overlay" id="settingsOverlay">
-  <div class="modal">
+  <div class="modal modal-wide">
     <div class="modal-head">
       <h3>Ayarlar</h3>
       <button class="icon-btn" id="closeSettings">
@@ -171,12 +171,35 @@
 
     <div class="modal-section">
       <div class="modal-section-title">Bildirim E-postaları</div>
-      <p class="modal-hint">Arka plan taraması <strong>3 Çok Önemli</strong>, <strong>5 Önemli</strong> ya da <strong>15 Bakmaya Değer</strong> yeni haber biriktirdiğinde bu adreslere e-posta gönderilir.</p>
+      <p class="modal-hint">Her e-posta adresi, önemli haber biriktiğinde bildirim almak için kendi eşik sayılarını kullanabilir — ya da aşağıdaki ortak (varsayılan) eşiği kullanabilir.</p>
+
+      <div class="esik-ortak-blok">
+        <div class="filter-popover-title">Ortak Eşik (Varsayılan)</div>
+        <p class="modal-hint" style="margin:0 0 10px;">Bir sınıfın kutusunu kapatırsanız, o önem derecesi için hiç e-posta gönderilmez.</p>
+        <div class="esik-input-row">
+          <div class="esik-input-field">
+            <label class="esik-aktif-toggle"><input type="checkbox" id="ortakAktifCokOnemli" checked> Çok Önemli</label>
+            <input type="number" min="1" id="ortakEsikCokOnemli">
+          </div>
+          <div class="esik-input-field">
+            <label class="esik-aktif-toggle"><input type="checkbox" id="ortakAktifOnemli" checked> Önemli</label>
+            <input type="number" min="1" id="ortakEsikOnemli">
+          </div>
+          <div class="esik-input-field">
+            <label class="esik-aktif-toggle"><input type="checkbox" id="ortakAktifBakmayaDeger" checked> Bakmaya Değer</label>
+            <input type="number" min="1" id="ortakEsikBakmayaDeger">
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" id="ortakEsikKaydetBtn" style="margin-top:10px;">Ortak Eşiği Kaydet</button>
+      </div>
+
+      <div class="modal-divider" style="margin:16px 0;"></div>
+
       <div class="key-row">
         <input type="text" id="epostaInput" placeholder="ornek@eposta.com">
         <button class="btn btn-primary btn-sm" id="epostaEkleBtn">Ekle</button>
       </div>
-      <div class="account-chip-row" id="epostaListesi" style="margin-top:12px;"></div>
+      <div id="epostaListesi" style="margin-top:12px; display:flex; flex-direction:column; gap:10px;"></div>
 
       <div class="modal-divider" style="margin:16px 0;"></div>
 

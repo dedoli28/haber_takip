@@ -165,10 +165,84 @@ function filtreRozetGuncelle(rozetId, sayac) {
 }
 
 /* ===================== Ayarlar modal (bildirim e-postaları) ===================== */
-function epostaChipCiz(epostalar) {
+/* ===================== Bildirim e-postaları + esikler ===================== */
+const SINIF_ESIK_SIRA = [
+  ["cok_onemli", "Çok Önemli"],
+  ["onemli", "Önemli"],
+  ["bakmaya_deger", "Bakmaya Değer"],
+];
+const VARSAYILAN_ORTAK_ESIK = {
+  cok_onemli: { aktif: true, esik: 15 },
+  onemli: { aktif: true, esik: 60 },
+  bakmaya_deger: { aktif: true, esik: 180 },
+};
+let mevcutAyarlar = { ortak_esik: JSON.parse(JSON.stringify(VARSAYILAN_ORTAK_ESIK)), alicilar: [] };
+
+function esikGirdileriniOku(kapsam) {
+  const esik = {};
+  kapsam.querySelectorAll("input[data-sinif]").forEach((inp) => {
+    const sinif = inp.dataset.sinif;
+    const aktifCB = kapsam.querySelector(`input[data-sinif-aktif="${sinif}"]`);
+    esik[sinif] = { aktif: aktifCB ? aktifCB.checked : true, esik: Math.max(1, parseInt(inp.value, 10) || 1) };
+  });
+  return esik;
+}
+
+function esikInputSatiriOlustur(deger) {
+  const satir = document.createElement("div");
+  satir.className = "esik-input-row";
+  SINIF_ESIK_SIRA.forEach(([sinif, etiket]) => {
+    const alan = document.createElement("div");
+    alan.className = "esik-input-field";
+
+    const lbl = document.createElement("label");
+    lbl.className = "esik-aktif-toggle";
+    const aktifCB = document.createElement("input");
+    aktifCB.type = "checkbox";
+    aktifCB.checked = deger[sinif].aktif !== false;
+    aktifCB.dataset.sinifAktif = sinif;
+    lbl.appendChild(aktifCB);
+    lbl.appendChild(document.createTextNode(" " + etiket));
+    alan.appendChild(lbl);
+
+    const inp = document.createElement("input");
+    inp.type = "number";
+    inp.min = "1";
+    inp.value = deger[sinif].esik;
+    inp.dataset.sinif = sinif;
+    inp.disabled = !aktifCB.checked;
+    aktifCB.addEventListener("change", () => { inp.disabled = !aktifCB.checked; });
+    alan.appendChild(inp);
+
+    satir.appendChild(alan);
+  });
+  return satir;
+}
+
+function esikOzetMetni(esik) {
+  return SINIF_ESIK_SIRA.map(([sinif, etiket]) => {
+    const veri = esik[sinif];
+    return `${etiket}: ${veri.aktif !== false ? veri.esik : "Kapalı"}`;
+  }).join(", ");
+}
+
+function ortakEsikInputlariniDoldur() {
+  $("ortakAktifCokOnemli").checked = mevcutAyarlar.ortak_esik.cok_onemli.aktif !== false;
+  $("ortakEsikCokOnemli").value = mevcutAyarlar.ortak_esik.cok_onemli.esik;
+  $("ortakEsikCokOnemli").disabled = !$("ortakAktifCokOnemli").checked;
+  $("ortakAktifOnemli").checked = mevcutAyarlar.ortak_esik.onemli.aktif !== false;
+  $("ortakEsikOnemli").value = mevcutAyarlar.ortak_esik.onemli.esik;
+  $("ortakEsikOnemli").disabled = !$("ortakAktifOnemli").checked;
+  $("ortakAktifBakmayaDeger").checked = mevcutAyarlar.ortak_esik.bakmaya_deger.aktif !== false;
+  $("ortakEsikBakmayaDeger").value = mevcutAyarlar.ortak_esik.bakmaya_deger.esik;
+  $("ortakEsikBakmayaDeger").disabled = !$("ortakAktifBakmayaDeger").checked;
+}
+
+function aliciListesiCiz() {
   const kutu = $("epostaListesi");
   kutu.innerHTML = "";
-  if (epostalar.length === 0) {
+
+  if (mevcutAyarlar.alicilar.length === 0) {
     const bos = document.createElement("p");
     bos.className = "modal-hint";
     bos.style.margin = "0";
@@ -176,58 +250,118 @@ function epostaChipCiz(epostalar) {
     kutu.appendChild(bos);
     return;
   }
-  epostalar.forEach((eposta) => {
-    const chip = document.createElement("span");
-    chip.className = "chip is-active";
-    chip.style.cursor = "default";
-    chip.style.display = "inline-flex";
-    chip.style.alignItems = "center";
-    chip.style.gap = "8px";
-    chip.textContent = eposta;
 
-    const sil = document.createElement("span");
-    sil.textContent = "✕";
-    sil.style.cursor = "pointer";
-    sil.style.opacity = "0.85";
-    sil.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      await epostaListesiGuncelle(epostalar.filter((x) => x !== eposta));
+  mevcutAyarlar.alicilar.forEach((alici, index) => {
+    const satir = document.createElement("div");
+    satir.className = "alici-esik-satir";
+
+    const bas = document.createElement("div");
+    bas.className = "alici-esik-bas";
+
+    const adres = document.createElement("span");
+    adres.className = "alici-esik-adres";
+    adres.textContent = alici.eposta;
+    bas.appendChild(adres);
+
+    const ozelLabel = document.createElement("label");
+    ozelLabel.className = "ozel-esik-toggle";
+    const ozelCheckbox = document.createElement("input");
+    ozelCheckbox.type = "checkbox";
+    ozelCheckbox.checked = !!alici.esik;
+    ozelLabel.appendChild(ozelCheckbox);
+    ozelLabel.appendChild(document.createTextNode(" Özel eşik"));
+    bas.appendChild(ozelLabel);
+
+    const silBtn = document.createElement("span");
+    silBtn.className = "alici-sil-btn";
+    silBtn.textContent = "✕";
+    silBtn.title = "Kaldır";
+    silBtn.addEventListener("click", () => {
+      mevcutAyarlar.alicilar.splice(index, 1);
+      ayarlariKaydet("E-posta kaldırıldı.");
     });
-    chip.appendChild(sil);
-    kutu.appendChild(chip);
+    bas.appendChild(silBtn);
+
+    satir.appendChild(bas);
+
+    const girdiSatiri = esikInputSatiriOlustur(alici.esik || mevcutAyarlar.ortak_esik);
+    girdiSatiri.style.display = alici.esik ? "flex" : "none";
+    girdiSatiri.style.marginTop = "10px";
+    satir.appendChild(girdiSatiri);
+
+    const ortakBilgi = document.createElement("p");
+    ortakBilgi.className = "modal-hint";
+    ortakBilgi.style.margin = "8px 0 0";
+    ortakBilgi.style.display = alici.esik ? "none" : "block";
+    ortakBilgi.textContent = `Ortak ayarı kullanıyor: ${esikOzetMetni(mevcutAyarlar.ortak_esik)}`;
+    satir.appendChild(ortakBilgi);
+
+    const kaydetBtn = document.createElement("button");
+    kaydetBtn.className = "btn btn-outline btn-sm";
+    kaydetBtn.style.marginTop = "8px";
+    kaydetBtn.style.display = alici.esik ? "inline-flex" : "none";
+    kaydetBtn.textContent = "Kaydet";
+    kaydetBtn.addEventListener("click", () => {
+      mevcutAyarlar.alicilar[index].esik = esikGirdileriniOku(girdiSatiri);
+      ayarlariKaydet("Eşik güncellendi.");
+    });
+    satir.appendChild(kaydetBtn);
+
+    ozelCheckbox.addEventListener("change", () => {
+      if (ozelCheckbox.checked) {
+        girdiSatiri.style.display = "flex";
+        kaydetBtn.style.display = "inline-flex";
+        ortakBilgi.style.display = "none";
+      } else {
+        girdiSatiri.style.display = "none";
+        kaydetBtn.style.display = "none";
+        ortakBilgi.style.display = "block";
+        mevcutAyarlar.alicilar[index].esik = null;
+        ayarlariKaydet("Ortak ayara geçildi.");
+      }
+    });
+
+    kutu.appendChild(satir);
   });
 }
 
-async function epostaAyarlariYukle() {
+async function ayarlarYukle() {
   try {
     const resp = await fetch("/api/ayarlar");
     const yanit = await resp.json();
-    if (yanit.ok) {
-      epostaChipCiz(yanit.ayarlar.bildirim_epostalari || []);
-      if (yanit.ayarlar.sonTestEpostasi) {
-        const bitis = new Date(yanit.ayarlar.sonTestEpostasi).getTime() + TEST_EPOSTA_BEKLEME_MS;
-        testEpostaBekleyenBitis = Math.max(testEpostaBekleyenBitis, bitis);
-      }
-      testEpostaDurumGuncelle();
-    } else {
-      toast(yanit.hata || "Ayarlar alınamadı.", "error");
+    if (!yanit.ok) { toast(yanit.hata || "Ayarlar alınamadı.", "error"); return; }
+
+    mevcutAyarlar = {
+      ortak_esik: yanit.ayarlar.ortak_esik || JSON.parse(JSON.stringify(VARSAYILAN_ORTAK_ESIK)),
+      alicilar: yanit.ayarlar.alicilar || [],
+    };
+
+    ortakEsikInputlariniDoldur();
+    aliciListesiCiz();
+
+    if (yanit.ayarlar.sonTestEpostasi) {
+      const bitis = new Date(yanit.ayarlar.sonTestEpostasi).getTime() + TEST_EPOSTA_BEKLEME_MS;
+      testEpostaBekleyenBitis = Math.max(testEpostaBekleyenBitis, bitis);
     }
+    testEpostaDurumGuncelle();
   } catch (e) {
     toast("Ayarlar alınamadı: " + e, "error");
   }
 }
 
-async function epostaListesiGuncelle(yeniListe) {
+async function ayarlariKaydet(basariMesaji) {
   try {
     const resp = await fetch("/api/ayarlar", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bildirim_epostalari: yeniListe }),
+      body: JSON.stringify(mevcutAyarlar),
     });
     const yanit = await resp.json();
     if (yanit.ok) {
-      epostaChipCiz(yanit.ayarlar.bildirim_epostalari || []);
-      toast("Bildirim e-postaları güncellendi.", "ok");
+      mevcutAyarlar = yanit.ayarlar;
+      ortakEsikInputlariniDoldur();
+      aliciListesiCiz();
+      if (basariMesaji) toast(basariMesaji, "ok");
     } else {
       toast(yanit.hata || "Kaydedilemedi.", "error");
     }
@@ -301,31 +435,50 @@ function testEpostaBaslat() {
 function ayarlarBaslat() {
   $("openSettings").addEventListener("click", () => {
     $("settingsOverlay").classList.add("is-open");
-    epostaAyarlariYukle();
+    ayarlarYukle();
   });
   $("closeSettings").addEventListener("click", () => $("settingsOverlay").classList.remove("is-open"));
+
+  $("ortakAktifCokOnemli").addEventListener("change", () => { $("ortakEsikCokOnemli").disabled = !$("ortakAktifCokOnemli").checked; });
+  $("ortakAktifOnemli").addEventListener("change", () => { $("ortakEsikOnemli").disabled = !$("ortakAktifOnemli").checked; });
+  $("ortakAktifBakmayaDeger").addEventListener("change", () => { $("ortakEsikBakmayaDeger").disabled = !$("ortakAktifBakmayaDeger").checked; });
   $("settingsOverlay").addEventListener("click", (e) => {
     if (e.target === $("settingsOverlay")) $("settingsOverlay").classList.remove("is-open");
   });
 
-  async function epostaEkle() {
+  function epostaEkle() {
     const input = $("epostaInput");
     const deger = input.value.trim();
     if (!deger) return;
     if (!epostaGecerliMi(deger)) { toast("Geçerli bir e-posta adresi gir.", "warn"); return; }
+    if (mevcutAyarlar.alicilar.some((a) => a.eposta === deger)) { toast("Bu e-posta zaten ekli.", "warn"); return; }
 
-    const resp = await fetch("/api/ayarlar");
-    const yanit = await resp.json();
-    const mevcut = yanit.ok ? (yanit.ayarlar.bildirim_epostalari || []) : [];
-    if (mevcut.includes(deger)) { toast("Bu e-posta zaten ekli.", "warn"); return; }
-
-    await epostaListesiGuncelle([...mevcut, deger]);
+    mevcutAyarlar.alicilar.push({ eposta: deger, esik: null });
+    ayarlariKaydet("E-posta eklendi.");
     input.value = "";
   }
 
   $("epostaEkleBtn").addEventListener("click", epostaEkle);
   $("epostaInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") epostaEkle();
+  });
+
+  $("ortakEsikKaydetBtn").addEventListener("click", () => {
+    mevcutAyarlar.ortak_esik = {
+      cok_onemli: {
+        aktif: $("ortakAktifCokOnemli").checked,
+        esik: Math.max(1, parseInt($("ortakEsikCokOnemli").value, 10) || VARSAYILAN_ORTAK_ESIK.cok_onemli.esik),
+      },
+      onemli: {
+        aktif: $("ortakAktifOnemli").checked,
+        esik: Math.max(1, parseInt($("ortakEsikOnemli").value, 10) || VARSAYILAN_ORTAK_ESIK.onemli.esik),
+      },
+      bakmaya_deger: {
+        aktif: $("ortakAktifBakmayaDeger").checked,
+        esik: Math.max(1, parseInt($("ortakEsikBakmayaDeger").value, 10) || VARSAYILAN_ORTAK_ESIK.bakmaya_deger.esik),
+      },
+    };
+    ayarlariKaydet("Ortak eşik güncellendi.");
   });
 
   testEpostaBaslat();

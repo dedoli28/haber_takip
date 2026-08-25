@@ -300,6 +300,24 @@ html[data-theme="light"] .skeleton-card::after {
 }
 .modal-wide { width: 640px; }
 .account-chip-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.esik-ortak-blok { background: var(--bg-input); border: 1px solid var(--border-soft); border-radius: var(--radius-md); padding: 12px 14px; }
+.esik-input-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.esik-input-field { display: flex; flex-direction: column; gap: 5px; flex: 1 1 100px; min-width: 90px; }
+.esik-input-field label { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: var(--text-faint); text-transform: uppercase; }
+.esik-input-field input { width: 100%; }
+.esik-input-field input[type="number"]:disabled { opacity: .4; cursor: not-allowed; }
+.esik-aktif-toggle { display: flex !important; flex-direction: row !important; align-items: center; gap: 5px; cursor: pointer; text-transform: none !important; }
+.esik-aktif-toggle input { cursor: pointer; width: auto !important; min-height: 0 !important; }
+
+.alici-esik-satir { background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: var(--radius-md); padding: 10px 12px; }
+.alici-esik-bas { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.alici-esik-adres { font-size: 13px; font-weight: 700; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ozel-esik-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.ozel-esik-toggle input { cursor: pointer; }
+.alici-sil-btn { cursor: pointer; color: var(--text-faint); font-size: 13px; padding: 2px 4px; }
+.alici-sil-btn:hover { color: var(--danger); }
+.alici-esik-satir .esik-input-row { margin-top: 10px; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .modal-head h3 { margin: 0; font-size: 16.5px; }
 .modal-section { padding: 14px 0 4px; }
