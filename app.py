@@ -3,8 +3,11 @@ Haber Takip Platformu - Vercel icin web surumu (v2: surekli izleme).
 
 Mimari:
   - /api/tara: disaridan (cron-job.org gibi ucretsiz bir servisten) periyodik
-    olarak cagrilir. Finviz'deki TUM haber turlerini + bloglari ceker, daha
-    once gorulmemis olanlari Gemini ile siniflandirir/ozetler/Turkce'ye
+    olarak cagrilir, POLL_SECRET ile korunur. /api/tara-manuel: ayni tarama
+    dongusunu arayuzdeki 'Şimdi Tara' butonu icin sirsiz calistirir. Ikisi de
+    Finviz'deki TUM haber turlerini + bloglari ceker, daha once gorulmemis
+    olanlari (bir seferde en fazla MAX_YENI_HABER_BASINA_TARAMA kadar,
+    zaman asimini asmamak icin) Gemini ile siniflandirir/ozetler/Turkce'ye
     cevirir, Upstash Redis'teki kalici depoya ekler; artik Finviz'de
     olmayanlari depodan siler. Esik asilinca (5 cok onemli / 10 onemli /
     30 bakmaya deger) e-posta gonderir.
@@ -51,6 +54,11 @@ app.add_middleware(
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
 TARA_GRUP_BOYUTU = 20
+# Bir /api/tara cagrisinda siniflandirilacak azami yeni haber sayisi. Finviz
+# taramasi + Gemini siniflandirmasi cron/Vercel zaman asimini asmasin diye
+# sinirlandirilir; kapasiteyi asan yeni haberler depoya eklenmez, bu yuzden
+# bir sonraki taramada tekrar "yeni" olarak gorulup sirayla islenir.
+MAX_YENI_HABER_BASINA_TARAMA = 40
 ESIKLER = {"cok_onemli": 5, "onemli": 10, "bakmaya_deger": 30}
 SINIF_ETIKET_TR = {"cok_onemli": "Çok Önemli", "onemli": "Önemli", "bakmaya_deger": "Bakmaya Değer"}
 
@@ -182,30 +190,36 @@ def _esik_email_html(tetiklenen: dict[str, list[str]], depo: dict) -> str:
     return "\n".join(parcalar)
 
 
-@app.post("/api/tara")
-def tara(request: Request):
-    beklenen_sir = os.environ.get("POLL_SECRET")
-    if beklenen_sir:
-        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
-        if gelen_sir != beklenen_sir:
-            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+class TaramaHatasi(Exception):
+    def __init__(self, mesaj: str, status_code: int = 502):
+        super().__init__(mesaj)
+        self.status_code = status_code
+
+
+def _tara_calistir() -> dict:
+    """Tek bir tarama dongusu calistirir (hem cron hem manuel tetikleme
+    tarafindan paylasilir): Finviz'i ceker, yeni ogeleri siniflandirir,
+    depoyu gunceller, esik/e-posta kontrolu yapar. Basarili durumda yanit
+    sozlugunu dondurur, hata durumunda TaramaHatasi firlatir."""
 
     api_key = _gemini_anahtari()
     if not api_key:
-        return JSONResponse({"ok": False, "hata": "Sunucuda GEMINI_API_KEY tanımlı değil."}, status_code=500)
+        raise TaramaHatasi("Sunucuda GEMINI_API_KEY tanımlı değil.", 500)
 
     try:
         guncel_ogeler, tarama_hatalari = tum_turleri_cek()
     except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+        raise TaramaHatasi(str(e)) from e
 
     try:
         depo = redis_store.depo_yukle()
     except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+        raise TaramaHatasi(str(e)) from e
 
     guncel_url_seti = {o["url"] for o in guncel_ogeler}
-    yeni_ogeler = [o for o in guncel_ogeler if o["url"] not in depo]
+    tum_yeni_ogeler = [o for o in guncel_ogeler if o["url"] not in depo]
+    yeni_ogeler = tum_yeni_ogeler[:MAX_YENI_HABER_BASINA_TARAMA]
+    isleme_alinmayan_sayisi = len(tum_yeni_ogeler) - len(yeni_ogeler)
 
     siniflandirma_hatalari: list[str] = []
     for i in range(0, len(yeni_ogeler), TARA_GRUP_BOYUTU):
@@ -227,7 +241,7 @@ def tara(request: Request):
         redis_store.depo_kaydet(depo)
         redis_store.son_tarama_kaydet(simdi)
     except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+        raise TaramaHatasi(str(e)) from e
 
     # esik takibi + e-posta bildirimi
     bekleyenler = redis_store.sayaclari_yukle()
@@ -262,11 +276,37 @@ def tara(request: Request):
     return {
         "ok": True,
         "yeniSayisi": len(yeni_ogeler),
+        "islenmeyenYeniSayisi": isleme_alinmayan_sayisi,
         "silinenSayisi": len(silinen_urller),
         "toplamDepo": len(depo),
         "taramaHatalari": tarama_hatalari,
         "siniflandirmaHatalari": siniflandirma_hatalari,
     }
+
+
+@app.post("/api/tara")
+def tara(request: Request):
+    """Disaridan (cron-job.org gibi) periyodik cagrilir; POLL_SECRET ile korunur."""
+    beklenen_sir = os.environ.get("POLL_SECRET")
+    if beklenen_sir:
+        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
+        if gelen_sir != beklenen_sir:
+            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+
+    try:
+        return _tara_calistir()
+    except TaramaHatasi as e:
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=e.status_code)
+
+
+@app.post("/api/tara-manuel")
+def tara_manuel():
+    """Arayuzdeki 'Şimdi Tara' butonu tarafindan cagrilir; kullanicinin
+    kendi uygulamasi oldugu icin ayrica sir gerektirmez."""
+    try:
+        return _tara_calistir()
+    except TaramaHatasi as e:
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=e.status_code)
 
 
 _ui_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static_ui")
