@@ -293,6 +293,57 @@ def _esik_email_html(tetiklenen: dict[str, list[str]], depo: dict) -> str:
     return "\n".join(parcalar)
 
 
+def _esik_takibi_ve_bildirim(yeni_ogeler: list[dict], depo: dict) -> list[str]:
+    """Yeni ogeleri alici basina bekleyen sayaclara ekler, esigi asan
+    alicilere e-posta gonderir. Hem gercek taramada (/api/tara) hem sentetik
+    test enjeksiyonunda (/api/sentetik-haber) kullanilir, boylece iki yol da
+    aynen tetikleme mantigindan gecer. Hata mesajlarinin listesini dondurur."""
+    hatalar: list[str] = []
+
+    ayarlar = redis_store.ayarlar_yukle()
+    ortak_esik = ayarlar.get("ortak_esik") or {s: dict(v) for s, v in redis_store.VARSAYILAN_ORTAK_ESIK.items()}
+    aliciler = [a for a in ayarlar.get("alicilar", []) if a.get("eposta")]
+
+    bekleyenler_tum = redis_store.sayaclari_yukle()  # {eposta: {sinif: [url, ...]}}
+
+    for alici in aliciler:
+        esikler = _alici_esikleri(alici, ortak_esik)
+        bekleyen = bekleyenler_tum.setdefault(alici["eposta"], {s: [] for s in SINIF_ESIK_LISTESI})
+        for o in yeni_ogeler:
+            s = o.get("sinif")
+            if s in bekleyen and esikler.get(s, {}).get("aktif", True):
+                bekleyen[s].append(o["url"])
+
+    if aliciler and not email_client.yapilandirilmis_mi():
+        hatalar.append("GMAIL_ADDRESS / GMAIL_APP_PASSWORD tanımlı değil, e-posta gönderilemedi.")
+    elif aliciler:
+        for alici in aliciler:
+            eposta = alici["eposta"]
+            esikler = _alici_esikleri(alici, ortak_esik)
+            bekleyen = bekleyenler_tum[eposta]
+            tetiklenen = {
+                s: bekleyen[s]
+                for s in SINIF_ESIK_LISTESI
+                if esikler.get(s, {}).get("aktif", True) and len(bekleyen.get(s, [])) >= esikler[s]["esik"]
+            }
+            if not tetiklenen:
+                continue
+            try:
+                html = _esik_email_html(tetiklenen, depo)
+                email_client.eposta_gonder([eposta], "Haber Takip Platformu - Yeni Önemli Haberler", html)
+                for s in tetiklenen:
+                    bekleyen[s] = []
+            except Exception as e:  # noqa: BLE001
+                hatalar.append(f"{eposta}: e-posta gönderilemedi: {e}")
+
+    try:
+        redis_store.sayaclari_kaydet(bekleyenler_tum)
+    except Exception as e:  # noqa: BLE001
+        hatalar.append(str(e))
+
+    return hatalar
+
+
 class TaramaHatasi(Exception):
     def __init__(self, mesaj: str, status_code: int = 502):
         super().__init__(mesaj)
@@ -346,48 +397,7 @@ def _tara_calistir() -> dict:
     except Exception as e:  # noqa: BLE001
         raise TaramaHatasi(str(e)) from e
 
-    # esik takibi + e-posta bildirimi (alici basina ayri sayac, ayri esik,
-    # sinif bazinda acik/kapali durumu)
-    ayarlar = redis_store.ayarlar_yukle()
-    ortak_esik = ayarlar.get("ortak_esik") or {s: dict(v) for s, v in redis_store.VARSAYILAN_ORTAK_ESIK.items()}
-    aliciler = [a for a in ayarlar.get("alicilar", []) if a.get("eposta")]
-
-    bekleyenler_tum = redis_store.sayaclari_yukle()  # {eposta: {sinif: [url, ...]}}
-
-    for alici in aliciler:
-        esikler = _alici_esikleri(alici, ortak_esik)
-        bekleyen = bekleyenler_tum.setdefault(alici["eposta"], {s: [] for s in SINIF_ESIK_LISTESI})
-        for o in yeni_ogeler:
-            s = o.get("sinif")
-            if s in bekleyen and esikler.get(s, {}).get("aktif", True):
-                bekleyen[s].append(o["url"])
-
-    if aliciler and not email_client.yapilandirilmis_mi():
-        siniflandirma_hatalari.append("GMAIL_ADDRESS / GMAIL_APP_PASSWORD tanımlı değil, e-posta gönderilemedi.")
-    elif aliciler:
-        for alici in aliciler:
-            eposta = alici["eposta"]
-            esikler = _alici_esikleri(alici, ortak_esik)
-            bekleyen = bekleyenler_tum[eposta]
-            tetiklenen = {
-                s: bekleyen[s]
-                for s in SINIF_ESIK_LISTESI
-                if esikler.get(s, {}).get("aktif", True) and len(bekleyen.get(s, [])) >= esikler[s]["esik"]
-            }
-            if not tetiklenen:
-                continue
-            try:
-                html = _esik_email_html(tetiklenen, depo)
-                email_client.eposta_gonder([eposta], "Haber Takip Platformu - Yeni Önemli Haberler", html)
-                for s in tetiklenen:
-                    bekleyen[s] = []
-            except Exception as e:  # noqa: BLE001
-                siniflandirma_hatalari.append(f"{eposta}: e-posta gönderilemedi: {e}")
-
-    try:
-        redis_store.sayaclari_kaydet(bekleyenler_tum)
-    except Exception as e:  # noqa: BLE001
-        siniflandirma_hatalari.append(str(e))
+    siniflandirma_hatalari.extend(_esik_takibi_ve_bildirim(yeni_ogeler, depo))
 
     try:
         redis_store.son_hatalar_kaydet(tarama_hatalari + siniflandirma_hatalari)
@@ -418,6 +428,70 @@ def tara(request: Request):
         return _tara_calistir()
     except TaramaHatasi as e:
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=e.status_code)
+
+
+@app.post("/api/sentetik-haber")
+def sentetik_haber_ekle(request: Request):
+    """Test amaclidir: gercek Finviz taramasi ya da Gemini siniflandirmasi
+    beklemeden, dogrudan istenen sinifta/sayida sahte haber ekleyip AYNI
+    esik/e-posta tetikleme mantigini (_esik_takibi_ve_bildirim) calistirir.
+    Boylece eşik ayarlarinizin gercekten calisip calismadigini deterministik
+    sekilde, dakikalarca beklemeden test edebilirsiniz. /api/tara ile ayni
+    POLL_SECRET korumasini kullanir. Eklenen sahte haberler 'test.local'
+    adresli sahte URL'ler kullanir; bir sonraki GERCEK taramada Finviz'de
+    bulunamayacaklari icin otomatik olarak depodan silinirler (kendiliginden
+    temizlenir, elle silmeye gerek yoktur)."""
+    beklenen_sir = os.environ.get("POLL_SECRET")
+    if beklenen_sir:
+        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
+        if gelen_sir != beklenen_sir:
+            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+
+    sinif = request.query_params.get("sinif", "cok_onemli")
+    if sinif not in SINIF_ESIK_LISTESI:
+        return JSONResponse(
+            {"ok": False, "hata": f"Geçersiz sınıf: {sinif} (geçerli: {', '.join(SINIF_ESIK_LISTESI)})"},
+            status_code=400,
+        )
+    try:
+        adet = max(1, min(200, int(request.query_params.get("adet", "1"))))
+    except ValueError:
+        adet = 1
+
+    try:
+        depo = redis_store.depo_yukle()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    simdi = datetime.now(timezone.utc)
+    yeni_ogeler = []
+    for i in range(adet):
+        url = f"https://test.local/sentetik/{simdi.timestamp()}-{i}"
+        oge = {
+            "id": url,
+            "url": url,
+            "kategori": "ana",
+            "tarih": simdi.date().isoformat(),
+            "saat": simdi.strftime("%H:%M"),
+            "kaynak": "sentetik-test",
+            "kaynakOzeti": "",
+            "baslik": f"[TEST] {SINIF_ETIKET_TR.get(sinif, sinif)} sentetik haber {i + 1}",
+            "baslikTr": f"[TEST] {SINIF_ETIKET_TR.get(sinif, sinif)} sentetik haber {i + 1}",
+            "sinif": sinif,
+            "ai_ozet": "Bu, eşik/e-posta mekanizmasını test etmek için oluşturulmuş sahte bir haberdir.",
+            "ilkGorulme": simdi.isoformat(),
+        }
+        depo[url] = oge
+        yeni_ogeler.append(oge)
+
+    try:
+        redis_store.depo_kaydet(depo)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    hatalar = _esik_takibi_ve_bildirim(yeni_ogeler, depo)
+
+    return {"ok": True, "eklenenSayisi": len(yeni_ogeler), "sinif": sinif, "hatalar": hatalar}
 
 
 _ui_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static_ui")
