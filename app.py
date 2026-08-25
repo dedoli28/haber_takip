@@ -145,9 +145,7 @@ def durum():
 @app.get("/api/ayarlar")
 def ayarlar_getir():
     try:
-        ayarlar = redis_store.ayarlar_yukle()
-        ayarlar["sonTestEpostasi"] = redis_store.son_test_epostasi_yukle()
-        return {"ok": True, "ayarlar": ayarlar}
+        return {"ok": True, "ayarlar": redis_store.ayarlar_yukle()}
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
@@ -188,67 +186,6 @@ async def ayarlar_guncelle(request: Request):
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
     return {"ok": True, "ayarlar": yeni_ayarlar}
-
-
-TEST_EPOSTA_BEKLEME_SANIYE = 10 * 60
-
-
-@app.post("/api/test-eposta")
-def test_eposta():
-    """Ayarlar modalindaki 'Deneme E-postası Gönder' butonu tarafindan
-    cagrilir; kotuye kullanimi/spam'i onlemek icin son gonderimden itibaren
-    TEST_EPOSTA_BEKLEME_SANIYE gecmeden tekrar gonderilemez (Redis'te kalici
-    olarak takip edilir, tarayici/sekme yenilense bile gecerlidir)."""
-    try:
-        ayarlar = redis_store.ayarlar_yukle()
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
-
-    aliciler = [a["eposta"] for a in ayarlar.get("alicilar", []) if a.get("eposta")]
-    if not aliciler:
-        return JSONResponse({"ok": False, "hata": "Önce Ayarlar'a en az bir bildirim e-postası ekleyin."}, status_code=400)
-
-    if not email_client.yapilandirilmis_mi():
-        return JSONResponse({"ok": False, "hata": "Sunucuda GMAIL_ADDRESS / GMAIL_APP_PASSWORD tanımlı değil."}, status_code=500)
-
-    try:
-        son = redis_store.son_test_epostasi_yukle()
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
-
-    if son:
-        try:
-            gecen_saniye = (datetime.now(timezone.utc) - datetime.fromisoformat(son)).total_seconds()
-        except ValueError:
-            gecen_saniye = TEST_EPOSTA_BEKLEME_SANIYE
-        if gecen_saniye < TEST_EPOSTA_BEKLEME_SANIYE:
-            kalan_saniye = int(TEST_EPOSTA_BEKLEME_SANIYE - gecen_saniye)
-            kalan_dk = kalan_saniye // 60 + 1
-            return JSONResponse(
-                {
-                    "ok": False,
-                    "hata": f"Çok sık deneme e-postası istendi, {kalan_dk} dakika sonra tekrar deneyin.",
-                    "kalanSaniye": kalan_saniye,
-                },
-                status_code=429,
-            )
-
-    html = (
-        "<h2>Haber Takip Platformu</h2>"
-        "<p>Bu bir deneme e-postasıdır. Bu e-postayı görüyorsanız bildirim ayarlarınız doğru çalışıyor.</p>"
-    )
-    try:
-        email_client.eposta_gonder(aliciler, "Haber Takip Platformu - Deneme E-postası", html)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
-
-    simdi = datetime.now(timezone.utc).isoformat()
-    try:
-        redis_store.son_test_epostasi_kaydet(simdi)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
-
-    return {"ok": True, "gonderilenSayisi": len(aliciler), "sonTestEpostasi": simdi}
 
 
 @app.post("/api/analiz")
