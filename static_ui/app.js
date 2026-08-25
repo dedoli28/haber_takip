@@ -204,6 +204,11 @@ async function epostaAyarlariYukle() {
     const yanit = await resp.json();
     if (yanit.ok) {
       epostaChipCiz(yanit.ayarlar.bildirim_epostalari || []);
+      if (yanit.ayarlar.sonTestEpostasi) {
+        const bitis = new Date(yanit.ayarlar.sonTestEpostasi).getTime() + TEST_EPOSTA_BEKLEME_MS;
+        testEpostaBekleyenBitis = Math.max(testEpostaBekleyenBitis, bitis);
+      }
+      testEpostaDurumGuncelle();
     } else {
       toast(yanit.hata || "Ayarlar alınamadı.", "error");
     }
@@ -235,6 +240,64 @@ function epostaGecerliMi(eposta) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(eposta);
 }
 
+/* ===================== Deneme e-postası (iki adımlı onay + 10 dk bekleme) ===================== */
+const TEST_EPOSTA_BEKLEME_MS = 10 * 60 * 1000;
+let testEpostaBekleyenBitis = 0;
+
+function testEpostaDurumGuncelle() {
+  const simdi = Date.now();
+  const btn = $("testEpostaBtn");
+  const durum = $("testEpostaDurum");
+  if (testEpostaBekleyenBitis > simdi) {
+    btn.disabled = true;
+    const kalanDk = Math.ceil((testEpostaBekleyenBitis - simdi) / 60000);
+    durum.textContent = `Tekrar göndermek için ${kalanDk} dakika bekleyin.`;
+    durum.style.display = "block";
+  } else {
+    btn.disabled = false;
+    durum.style.display = "none";
+  }
+}
+
+function testEpostaBaslat() {
+  $("testEpostaBtn").addEventListener("click", () => {
+    if ($("testEpostaBtn").disabled) return;
+    $("testEpostaBtn").style.display = "none";
+    $("testEpostaOnay").style.display = "block";
+  });
+
+  $("testEpostaVazgecBtn").addEventListener("click", () => {
+    $("testEpostaOnay").style.display = "none";
+    $("testEpostaBtn").style.display = "inline-flex";
+  });
+
+  $("testEpostaIlerleBtn").addEventListener("click", async () => {
+    const ilerleBtn = $("testEpostaIlerleBtn");
+    ilerleBtn.disabled = true;
+    ilerleBtn.textContent = "Gönderiliyor...";
+
+    try {
+      const resp = await fetch("/api/test-eposta", { method: "POST" });
+      const yanit = await resp.json();
+      if (yanit.ok) {
+        toast(`Deneme e-postası ${yanit.gonderilenSayisi} adrese gönderildi.`, "ok");
+        testEpostaBekleyenBitis = Date.now() + TEST_EPOSTA_BEKLEME_MS;
+      } else {
+        toast(yanit.hata || "Deneme e-postası gönderilemedi.", "error");
+        if (yanit.kalanSaniye) testEpostaBekleyenBitis = Date.now() + yanit.kalanSaniye * 1000;
+      }
+    } catch (e) {
+      toast("Beklenmeyen hata: " + e, "error");
+    } finally {
+      ilerleBtn.disabled = false;
+      ilerleBtn.textContent = "İlerle";
+      $("testEpostaOnay").style.display = "none";
+      $("testEpostaBtn").style.display = "inline-flex";
+      testEpostaDurumGuncelle();
+    }
+  });
+}
+
 function ayarlarBaslat() {
   $("openSettings").addEventListener("click", () => {
     $("settingsOverlay").classList.add("is-open");
@@ -264,6 +327,8 @@ function ayarlarBaslat() {
   $("epostaInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") epostaEkle();
   });
+
+  testEpostaBaslat();
 }
 
 /* ===================== Kaydedilenler (localStorage) ===================== */
@@ -662,42 +727,7 @@ function haberPaneliOlustur() {
     }
   }
 
-  async function simdiTara() {
-    const btn = $("haberSimdiTaraBtn");
-    if (btn.disabled) return;
-    btn.disabled = true;
-    const oncekiHtml = btn.innerHTML;
-    btn.innerHTML = "Taranıyor...";
-    ustProgres(true);
-    $("haberSonTarama").textContent = "Finviz taranıyor, bu birkaç saniye sürebilir...";
-
-    try {
-      const resp = await fetch("/api/tara-manuel", { method: "POST" });
-      const yanit = await resp.json();
-      if (!yanit.ok) {
-        toast(yanit.hata || "Tarama başarısız.", "error");
-      } else {
-        let mesaj = `Tarama tamamlandı: ${yanit.yeniSayisi} yeni haber işlendi, ${yanit.silinenSayisi} haber depodan kaldırıldı.`;
-        if (yanit.islenmeyenYeniSayisi > 0) {
-          mesaj += ` ${yanit.islenmeyenYeniSayisi} yeni haber daha var, bir sonraki taramada işlenecek.`;
-        }
-        toast(mesaj, "ok");
-        if (yanit.taramaHatalari && yanit.taramaHatalari.length) {
-          toast(yanit.taramaHatalari.join(" · "), "warn");
-        }
-      }
-      await yenile(true);
-    } catch (e) {
-      toast("Beklenmeyen hata: " + e, "error");
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = oncekiHtml;
-      ustProgres(false);
-    }
-  }
-
   $("haberYenileBtn").addEventListener("click", () => yenile(false));
-  $("haberSimdiTaraBtn").addEventListener("click", simdiTara);
 
   return yenile;
 }
