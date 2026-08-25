@@ -22,9 +22,11 @@
   --radius-md: 10px;
   --radius-sm: 7px;
   --font: "Segoe UI", -apple-system, "Inter", system-ui, sans-serif;
+  color-scheme: dark;
 }
 
 html[data-theme="light"] {
+  color-scheme: light;
   --bg: #f4f5f8;
   --bg-header: #ffffff;
   --bg-panel: #ffffff;
@@ -154,13 +156,15 @@ button, input, select { font-family: inherit; font-size: inherit; color: inherit
   font-size: 13px; font-weight: 700; color: var(--text); display: block; margin-bottom: 10px;
 }
 
-select, input[type="text"], input[type="password"] {
-  background: var(--bg-input); border: 1px solid var(--border);
+select, input[type="text"], input[type="password"], input[type="number"] {
+  background: var(--bg-input); border: 1px solid var(--border); color: var(--text);
   border-radius: 8px; padding: 7px 11px; outline: none; min-height: 32px;
   transition: border-color .15s ease; width: 100%;
 }
 select:focus, input:focus { border-color: var(--accent); }
 select { min-width: 170px; cursor: pointer; width: auto; }
+
+input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
 
 .hint { font-size: 11.5px; color: var(--text-faint); margin: 8px 2px 0; }
 
