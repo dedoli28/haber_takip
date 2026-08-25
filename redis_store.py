@@ -26,10 +26,24 @@ SON_TARAMA_KEY = "htp:son_tarama"
 SON_TEST_EPOSTASI_KEY = "htp:son_test_epostasi"
 SON_HATALAR_KEY = "htp:son_hatalar"
 
-VARSAYILAN_AYARLAR = {"bildirim_epostalari": []}
-# Esik sayaclari aslinda "bekleyen" (henuz e-postayla bildirilmemis) haberlerin
-# URL listesidir; esige ulasinca bu URL'lerin haber bilgisi e-postaya gomulur.
-VARSAYILAN_SAYAC = {"cok_onemli": [], "onemli": [], "bakmaya_deger": []}
+SINIF_ESIK_LISTESI = ["cok_onemli", "onemli", "bakmaya_deger"]
+
+# Her sinif icin {"aktif": bool, "esik": N} seklinde: aktif=False ise o sinif
+# icin o alici/ortak ayar hic e-posta gondermez (esik degeri yok sayilir).
+VARSAYILAN_ORTAK_ESIK = {
+    "cok_onemli": {"aktif": True, "esik": 15},
+    "onemli": {"aktif": True, "esik": 60},
+    "bakmaya_deger": {"aktif": True, "esik": 180},
+}
+
+# alicilar: [{"eposta": str, "esik": {sinif: {"aktif":bool,"esik":N}, ...} | None}, ...]
+# esik alani None (ya da bir sinif eksikse o sinif icin) ortak_esik kullanilir.
+VARSAYILAN_AYARLAR = {"ortak_esik": {s: dict(v) for s, v in VARSAYILAN_ORTAK_ESIK.items()}, "alicilar": []}
+
+# Esik sayaclari aslinda alici basina "bekleyen" (henuz o aliciya e-postayla
+# bildirilmemis) haberlerin URL listesidir: {eposta: {sinif: [url, ...]}}.
+# Her alici kendi esigine ulastikca yalnizca kendi sayaci sifirlanir.
+VARSAYILAN_SAYAC: dict = {}
 
 
 def yapilandirilmis_mi() -> bool:

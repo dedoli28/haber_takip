@@ -8,8 +8,8 @@ Mimari:
     MAX_YENI_HABER_BASINA_TARAMA kadar, kategoriler arasinda adil dagitarak,
     zaman asimini asmamak icin) Gemini ile siniflandirir/ozetler/Turkce'ye
     cevirir, Upstash Redis'teki kalici depoya ekler; artik Finviz'de
-    olmayanlari depodan siler. Esik asilinca (3 cok onemli / 5 onemli /
-    15 bakmaya deger) e-posta gonderir.
+    olmayanlari depodan siler. Her alici kendi esigine (ozel tanimlamadiysa
+    ortak/varsayilan esige) ulasinca kendisine ayrica e-posta gonderilir.
   - /api/haberler: depodaki tum haberleri dondurur (istemci bunlari
     tarih/tur/onem'e gore kendi tarafinda filtreler).
   - /api/analiz, /api/gun-ozeti: istege bagli AI islemleri; sunucunun kendi
@@ -58,12 +58,19 @@ TARA_GRUP_BOYUTU = 20
 # sinirlandirilir; kapasiteyi asan yeni haberler depoya eklenmez, bu yuzden
 # bir sonraki taramada tekrar "yeni" olarak gorulup sirayla islenir.
 MAX_YENI_HABER_BASINA_TARAMA = 60
-ESIKLER = {"cok_onemli": 3, "onemli": 5, "bakmaya_deger": 15}
+SINIF_ESIK_LISTESI = redis_store.SINIF_ESIK_LISTESI
 SINIF_ETIKET_TR = {"cok_onemli": "Çok Önemli", "onemli": "Önemli", "bakmaya_deger": "Bakmaya Değer"}
 
 
 def _gemini_anahtari() -> str:
     return os.environ.get("GEMINI_API_KEY", "")
+
+
+def _alici_esikleri(alici: dict, ortak_esik: dict) -> dict:
+    """Alicinin sinif basina ozel esigi varsa onu, tanimlamadigi siniflar
+    icin ortak esigi kullanir (sinif bazinda birlestirme)."""
+    ozel = alici.get("esik") or {}
+    return {s: ozel.get(s, ortak_esik[s]) for s in SINIF_ESIK_LISTESI}
 
 
 def _kategoriler_arasi_adil_sec(ogeler: list[dict], sinir: int) -> list[dict]:
@@ -98,20 +105,37 @@ def haberler():
 
 @app.get("/api/durum")
 def durum():
-    """E-posta bildirim mekanizmasini teshis etmek icin: eslik sayaclarinin
-    (bekleyen, henuz mail atilmamis haber sayisi) o anki durumunu, esikleri
-    ve e-posta yapilandirmasinin sunucuda tanimli olup olmadigini gosterir."""
+    """E-posta bildirim mekanizmasini teshis etmek icin: alici basina esik
+    ve bekleyen (henuz o aliciya mail atilmamis) haber sayilarini, e-posta
+    yapilandirmasinin sunucuda tanimli olup olmadigini gosterir."""
     try:
-        bekleyenler = redis_store.sayaclari_yukle()
+        bekleyenler_tum = redis_store.sayaclari_yukle()
         ayarlar = redis_store.ayarlar_yukle()
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
+    ortak_esik = ayarlar.get("ortak_esik") or {s: dict(v) for s, v in redis_store.VARSAYILAN_ORTAK_ESIK.items()}
+    aliciler = ayarlar.get("alicilar", [])
+
+    alici_durumlari = []
+    for alici in aliciler:
+        eposta = alici.get("eposta")
+        if not eposta:
+            continue
+        esikler = _alici_esikleri(alici, ortak_esik)
+        bekleyen = bekleyenler_tum.get(eposta, {})
+        alici_durumlari.append(
+            {
+                "eposta": eposta,
+                "esikler": esikler,
+                "bekleyenSayilar": {s: len(bekleyen.get(s, [])) for s in SINIF_ESIK_LISTESI},
+            }
+        )
+
     return {
         "ok": True,
-        "esikler": ESIKLER,
-        "bekleyenSayilar": {s: len(u) for s, u in bekleyenler.items()},
-        "bildirimEpostalari": ayarlar.get("bildirim_epostalari", []),
+        "ortakEsik": ortak_esik,
+        "aliciDurumlari": alici_durumlari,
         "epostaYapilandirilmisMi": email_client.yapilandirilmis_mi(),
         "sonTarama": redis_store.son_tarama_yukle(),
         "sonHatalar": redis_store.son_hatalar_yukle(),
@@ -128,15 +152,42 @@ def ayarlar_getir():
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
 
+def _esik_gecerle(ham: dict | None, varsayilan: dict) -> dict:
+    """{"aktif": bool, "esik": N} seklindeki sinif basina esik verisini
+    dogrular/tamamlar; eksik/gecersiz alanlar icin varsayilana duser."""
+    esik = {}
+    for sinif in SINIF_ESIK_LISTESI:
+        ham_sinif = (ham or {}).get(sinif) or {}
+        aktif = bool(ham_sinif.get("aktif", varsayilan[sinif]["aktif"]))
+        try:
+            deger = int(ham_sinif.get("esik"))
+        except (TypeError, ValueError):
+            deger = varsayilan[sinif]["esik"]
+        esik[sinif] = {"aktif": aktif, "esik": max(1, deger)}
+    return esik
+
+
 @app.post("/api/ayarlar")
 async def ayarlar_guncelle(request: Request):
     body = await request.json()
-    epostalar = [e.strip() for e in (body.get("bildirim_epostalari") or []) if e.strip()]
+
+    ortak_esik = _esik_gecerle(body.get("ortak_esik"), redis_store.VARSAYILAN_ORTAK_ESIK)
+
+    alicilar = []
+    for a in body.get("alicilar") or []:
+        eposta = (a.get("eposta") or "").strip()
+        if not eposta:
+            continue
+        ozel_ham = a.get("esik")
+        ozel = _esik_gecerle(ozel_ham, ortak_esik) if ozel_ham else None
+        alicilar.append({"eposta": eposta, "esik": ozel})
+
+    yeni_ayarlar = {"ortak_esik": ortak_esik, "alicilar": alicilar}
     try:
-        redis_store.ayarlar_kaydet({"bildirim_epostalari": epostalar})
+        redis_store.ayarlar_kaydet(yeni_ayarlar)
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
-    return {"ok": True, "ayarlar": {"bildirim_epostalari": epostalar}}
+    return {"ok": True, "ayarlar": yeni_ayarlar}
 
 
 TEST_EPOSTA_BEKLEME_SANIYE = 10 * 60
@@ -153,7 +204,7 @@ def test_eposta():
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
-    aliciler = ayarlar.get("bildirim_epostalari", [])
+    aliciler = [a["eposta"] for a in ayarlar.get("alicilar", []) if a.get("eposta")]
     if not aliciler:
         return JSONResponse({"ok": False, "hata": "Önce Ayarlar'a en az bir bildirim e-postası ekleyin."}, status_code=400)
 
@@ -358,33 +409,46 @@ def _tara_calistir() -> dict:
     except Exception as e:  # noqa: BLE001
         raise TaramaHatasi(str(e)) from e
 
-    # esik takibi + e-posta bildirimi
-    bekleyenler = redis_store.sayaclari_yukle()
-    for o in yeni_ogeler:
-        s = o.get("sinif")
-        if s in bekleyenler:
-            bekleyenler[s].append(o["url"])
+    # esik takibi + e-posta bildirimi (alici basina ayri sayac, ayri esik,
+    # sinif bazinda acik/kapali durumu)
+    ayarlar = redis_store.ayarlar_yukle()
+    ortak_esik = ayarlar.get("ortak_esik") or {s: dict(v) for s, v in redis_store.VARSAYILAN_ORTAK_ESIK.items()}
+    aliciler = [a for a in ayarlar.get("alicilar", []) if a.get("eposta")]
 
-    tetiklenen = {s: bekleyenler[s] for s, esik in ESIKLER.items() if len(bekleyenler.get(s, [])) >= esik}
+    bekleyenler_tum = redis_store.sayaclari_yukle()  # {eposta: {sinif: [url, ...]}}
 
-    if tetiklenen:
-        ayarlar = redis_store.ayarlar_yukle()
-        aliciler = ayarlar.get("bildirim_epostalari", [])
-        if aliciler and email_client.yapilandirilmis_mi():
+    for alici in aliciler:
+        esikler = _alici_esikleri(alici, ortak_esik)
+        bekleyen = bekleyenler_tum.setdefault(alici["eposta"], {s: [] for s in SINIF_ESIK_LISTESI})
+        for o in yeni_ogeler:
+            s = o.get("sinif")
+            if s in bekleyen and esikler.get(s, {}).get("aktif", True):
+                bekleyen[s].append(o["url"])
+
+    if aliciler and not email_client.yapilandirilmis_mi():
+        siniflandirma_hatalari.append("GMAIL_ADDRESS / GMAIL_APP_PASSWORD tanımlı değil, e-posta gönderilemedi.")
+    elif aliciler:
+        for alici in aliciler:
+            eposta = alici["eposta"]
+            esikler = _alici_esikleri(alici, ortak_esik)
+            bekleyen = bekleyenler_tum[eposta]
+            tetiklenen = {
+                s: bekleyen[s]
+                for s in SINIF_ESIK_LISTESI
+                if esikler.get(s, {}).get("aktif", True) and len(bekleyen.get(s, [])) >= esikler[s]["esik"]
+            }
+            if not tetiklenen:
+                continue
             try:
                 html = _esik_email_html(tetiklenen, depo)
-                email_client.eposta_gonder(aliciler, "Haber Takip Platformu - Yeni Önemli Haberler", html)
+                email_client.eposta_gonder([eposta], "Haber Takip Platformu - Yeni Önemli Haberler", html)
                 for s in tetiklenen:
-                    bekleyenler[s] = []
+                    bekleyen[s] = []
             except Exception as e:  # noqa: BLE001
-                siniflandirma_hatalari.append(f"E-posta gönderilemedi: {e}")
-        elif not aliciler:
-            pass  # bildirim e-postasi tanimli degil, sessizce atla
-        elif not email_client.yapilandirilmis_mi():
-            siniflandirma_hatalari.append("GMAIL_ADDRESS / GMAIL_APP_PASSWORD tanımlı değil, e-posta gönderilemedi.")
+                siniflandirma_hatalari.append(f"{eposta}: e-posta gönderilemedi: {e}")
 
     try:
-        redis_store.sayaclari_kaydet(bekleyenler)
+        redis_store.sayaclari_kaydet(bekleyenler_tum)
     except Exception as e:  # noqa: BLE001
         siniflandirma_hatalari.append(str(e))
 
