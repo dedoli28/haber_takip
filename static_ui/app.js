@@ -87,6 +87,83 @@ function sekmeBaslat(sekmeDegistiCallback) {
   });
 }
 
+/* ===================== Çoklu / tekli seçim çip grupları ===================== */
+function cokluSecimGrubuBaslat(chips, attr, degisinceCB) {
+  const secili = new Set();
+
+  function gorunumGuncelle() {
+    chips.forEach((chip) => {
+      const deger = chip.dataset[attr];
+      chip.classList.toggle("is-active", deger ? secili.has(deger) : secili.size === 0);
+    });
+  }
+
+  chips.forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const deger = chip.dataset[attr];
+      if (!deger) {
+        secili.clear();
+      } else if (secili.has(deger)) {
+        secili.delete(deger);
+      } else {
+        secili.add(deger);
+      }
+      gorunumGuncelle();
+      degisinceCB();
+    });
+  });
+
+  gorunumGuncelle();
+  return { secili, gorunumGuncelle, temizle: () => { secili.clear(); gorunumGuncelle(); } };
+}
+
+function tekliSecimGrubuBaslat(chips, attr, degisinceCB) {
+  const durum = { deger: "" };
+
+  function gorunumGuncelle() {
+    chips.forEach((chip) => chip.classList.toggle("is-active", (chip.dataset[attr] || "") === durum.deger));
+  }
+
+  chips.forEach((chip) => {
+    chip.addEventListener("click", () => {
+      durum.deger = chip.dataset[attr] || "";
+      gorunumGuncelle();
+      degisinceCB();
+    });
+  });
+
+  gorunumGuncelle();
+  return { durum, gorunumGuncelle, temizle: () => { durum.deger = ""; gorunumGuncelle(); } };
+}
+
+/* ===================== Filtreler popover ===================== */
+function filtrePopoverBaslat(btnId, popoverId) {
+  const btn = $(btnId);
+  const popover = $(popoverId);
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const aciliyor = !popover.classList.contains("is-open");
+    document.querySelectorAll(".filter-popover.is-open").forEach((p) => p.classList.remove("is-open"));
+    if (aciliyor) popover.classList.add("is-open");
+  });
+  popover.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", () => popover.classList.remove("is-open"));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") popover.classList.remove("is-open");
+  });
+}
+
+function filtreRozetGuncelle(rozetId, sayac) {
+  const rozet = $(rozetId);
+  if (sayac > 0) {
+    rozet.textContent = String(sayac);
+    rozet.style.display = "inline-flex";
+  } else {
+    rozet.style.display = "none";
+  }
+}
+
 /* ===================== Ayarlar modal (bildirim e-postaları) ===================== */
 function epostaChipCiz(epostalar) {
   const kutu = $("epostaListesi");
@@ -482,21 +559,43 @@ function bosDurumCiz(konteynerId, mesaj) {
   kutu.appendChild(bos);
 }
 
-/* ===================== Haberler paneli (yalnizca filtreleme, cekme yok) ===================== */
+/* ===================== Haberler paneli (filtreleme + manuel tarama) ===================== */
 function haberPaneliOlustur() {
-  const state = { tumOgeler: [], sinifFiltre: "", kategoriFiltre: "", tarihFiltre: "", arama: "" };
+  const state = { tumOgeler: [], arama: "" };
 
-  const sinifChips = document.querySelectorAll("#haberChips .chip");
-  const kategoriChips = document.querySelectorAll("#haberKategoriChips .chip");
-  const tarihChips = document.querySelectorAll("#haberTarihChips .chip");
+  const tarih = tekliSecimGrubuBaslat(
+    document.querySelectorAll("#haberTarihChips .chip"), "tarih", () => { rozetGuncelle(); ciz(); }
+  );
+  const kategori = cokluSecimGrubuBaslat(
+    document.querySelectorAll("#haberKategoriChips .chip"), "kategori", () => { rozetGuncelle(); ciz(); }
+  );
+  const sinif = cokluSecimGrubuBaslat(
+    document.querySelectorAll("#haberChips .chip"), "sinif", () => { rozetGuncelle(); ciz(); }
+  );
+
+  filtrePopoverBaslat("haberFiltreBtn", "haberFiltrePopover");
+
+  function rozetGuncelle() {
+    const sayac = (tarih.durum.deger ? 1 : 0) + kategori.secili.size + sinif.secili.size;
+    filtreRozetGuncelle("haberFiltreRozet", sayac);
+  }
+
+  $("haberFiltreTemizleBtn").addEventListener("click", () => {
+    tarih.temizle();
+    kategori.temizle();
+    sinif.temizle();
+    rozetGuncelle();
+    ciz();
+  });
+
   const arama = $("haberArama");
 
   function filtrele() {
     let gorulen = state.tumOgeler;
-    if (state.sinifFiltre) gorulen = gorulen.filter((h) => h.sinif === state.sinifFiltre);
-    if (state.kategoriFiltre) gorulen = gorulen.filter((h) => h.kategori === state.kategoriFiltre);
-    if (state.tarihFiltre === "bugun") gorulen = gorulen.filter((h) => h.tarih === bugununTarihi());
-    if (state.tarihFiltre === "dun") gorulen = gorulen.filter((h) => h.tarih === dununTarihi());
+    if (sinif.secili.size > 0) gorulen = gorulen.filter((h) => sinif.secili.has(h.sinif));
+    if (kategori.secili.size > 0) gorulen = gorulen.filter((h) => kategori.secili.has(h.kategori));
+    if (tarih.durum.deger === "bugun") gorulen = gorulen.filter((h) => h.tarih === bugununTarihi());
+    if (tarih.durum.deger === "dun") gorulen = gorulen.filter((h) => h.tarih === dununTarihi());
     if (state.arama) {
       const q = state.arama.toLowerCase();
       gorulen = gorulen.filter(
@@ -507,34 +606,6 @@ function haberPaneliOlustur() {
       );
     }
     return gorulen;
-  }
-
-  function chipSayilariGuncelle() {
-    const sayilar = {};
-    state.tumOgeler.forEach((h) => { sayilar[h.sinif] = (sayilar[h.sinif] || 0) + 1; });
-    sinifChips.forEach((chip) => {
-      const sinif = chip.dataset.sinif;
-      if (!sinif) { chip.textContent = `Tümü (${state.tumOgeler.length})`; return; }
-      chip.textContent = `${SINIF_ETIKET[sinif]} (${sayilar[sinif] || 0})`;
-    });
-
-    const katSayilar = {};
-    state.tumOgeler.forEach((h) => { if (h.kategori) katSayilar[h.kategori] = (katSayilar[h.kategori] || 0) + 1; });
-    kategoriChips.forEach((chip) => {
-      const kat = chip.dataset.kategori;
-      if (!kat) { chip.textContent = `Tüm Türler (${state.tumOgeler.length})`; return; }
-      chip.textContent = `${KATEGORI_ETIKET[kat] || kat} (${katSayilar[kat] || 0})`;
-    });
-
-    const bugun = bugununTarihi();
-    const dun = dununTarihi();
-    const bugunSayisi = state.tumOgeler.filter((h) => h.tarih === bugun).length;
-    const dunSayisi = state.tumOgeler.filter((h) => h.tarih === dun).length;
-    tarihChips.forEach((chip) => {
-      const t = chip.dataset.tarih;
-      if (!t) { chip.textContent = `Tüm Tarihler (${state.tumOgeler.length})`; return; }
-      chip.textContent = t === "bugun" ? `Bugün (${bugunSayisi})` : `Dün (${dunSayisi})`;
-    });
   }
 
   function ciz() {
@@ -550,39 +621,12 @@ function haberPaneliOlustur() {
         "haberListe",
         state.tumOgeler.length
           ? "Seçilen filtre/aramayla eşleşen içerik yok."
-          : 'Henüz haber yok. Arka plan taraması ilk sonuçları getirdiğinde burada görünecek.<br>"Yenile"ye basarak da kontrol edebilirsin.'
+          : 'Henüz haber yok. Arka plan taraması ilk sonuçları getirdiğinde burada görünecek.<br>"Şimdi Tara" ya da "Yenile"ye basarak da kontrol edebilirsin.'
       );
       return;
     }
     gorulen.forEach((h, i) => kutu.appendChild(kartOlustur(h, i, detayGoster)));
   }
-
-  sinifChips.forEach((chip) => {
-    chip.addEventListener("click", () => {
-      state.sinifFiltre = chip.dataset.sinif;
-      sinifChips.forEach((c) => c.classList.remove("is-active"));
-      chip.classList.add("is-active");
-      ciz();
-    });
-  });
-
-  kategoriChips.forEach((chip) => {
-    chip.addEventListener("click", () => {
-      state.kategoriFiltre = chip.dataset.kategori;
-      kategoriChips.forEach((c) => c.classList.remove("is-active"));
-      chip.classList.add("is-active");
-      ciz();
-    });
-  });
-
-  tarihChips.forEach((chip) => {
-    chip.addEventListener("click", () => {
-      state.tarihFiltre = chip.dataset.tarih;
-      tarihChips.forEach((c) => c.classList.remove("is-active"));
-      chip.classList.add("is-active");
-      ciz();
-    });
-  });
 
   arama.addEventListener("input", () => {
     state.arama = arama.value.trim();
@@ -596,10 +640,7 @@ function haberPaneliOlustur() {
   $("haberGunOzetBtn").addEventListener("click", gunuOzetle);
 
   async function yenile(sessiz = false) {
-    if (!sessiz) {
-      ustProgres(true);
-      $("haberYenileBtn").disabled = true;
-    }
+    if (!sessiz) ustProgres(true);
     try {
       const resp = await fetch("/api/haberler");
       const yanit = await resp.json();
@@ -608,65 +649,97 @@ function haberPaneliOlustur() {
         return;
       }
       state.tumOgeler = yanit.haberler || [];
-      chipSayilariGuncelle();
       ciz();
 
       if (yanit.sonTarama) {
-        const tarih = new Date(yanit.sonTarama);
-        $("haberSonTarama").textContent = `Sistem arka planda otomatik olarak Finviz'i tarıyor. Son tarama: ${tarih.toLocaleString("tr-TR")}`;
+        const t = new Date(yanit.sonTarama);
+        $("haberSonTarama").textContent = `Sistem arka planda otomatik olarak Finviz'i tarıyor. Son tarama: ${t.toLocaleString("tr-TR")}`;
       }
     } catch (e) {
       if (!sessiz) toast("Beklenmeyen hata: " + e, "error");
     } finally {
-      if (!sessiz) {
-        ustProgres(false);
-        $("haberYenileBtn").disabled = false;
+      if (!sessiz) ustProgres(false);
+    }
+  }
+
+  async function simdiTara() {
+    const btn = $("haberSimdiTaraBtn");
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const oncekiHtml = btn.innerHTML;
+    btn.innerHTML = "Taranıyor...";
+    ustProgres(true);
+    $("haberSonTarama").textContent = "Finviz taranıyor, bu birkaç saniye sürebilir...";
+
+    try {
+      const resp = await fetch("/api/tara-manuel", { method: "POST" });
+      const yanit = await resp.json();
+      if (!yanit.ok) {
+        toast(yanit.hata || "Tarama başarısız.", "error");
+      } else {
+        let mesaj = `Tarama tamamlandı: ${yanit.yeniSayisi} yeni haber işlendi, ${yanit.silinenSayisi} haber depodan kaldırıldı.`;
+        if (yanit.islenmeyenYeniSayisi > 0) {
+          mesaj += ` ${yanit.islenmeyenYeniSayisi} yeni haber daha var, bir sonraki taramada işlenecek.`;
+        }
+        toast(mesaj, "ok");
+        if (yanit.taramaHatalari && yanit.taramaHatalari.length) {
+          toast(yanit.taramaHatalari.join(" · "), "warn");
+        }
       }
+      await yenile(true);
+    } catch (e) {
+      toast("Beklenmeyen hata: " + e, "error");
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = oncekiHtml;
+      ustProgres(false);
     }
   }
 
   $("haberYenileBtn").addEventListener("click", () => yenile(false));
+  $("haberSimdiTaraBtn").addEventListener("click", simdiTara);
 
   return yenile;
 }
 
 /* ===================== Kaydedilenler paneli ===================== */
 function kayitliPaneliOlustur() {
-  const chips = document.querySelectorAll("#kayitliChips .chip");
-  const kategoriChips = document.querySelectorAll("#kayitliKategoriChips .chip");
+  const state = { arama: "" };
+
+  const kategori = cokluSecimGrubuBaslat(
+    document.querySelectorAll("#kayitliKategoriChips .chip"), "kategori", () => { rozetGuncelle(); ciz(); }
+  );
+  const sinif = cokluSecimGrubuBaslat(
+    document.querySelectorAll("#kayitliChips .chip"), "sinif", () => { rozetGuncelle(); ciz(); }
+  );
+
+  filtrePopoverBaslat("kayitliFiltreBtn", "kayitliFiltrePopover");
+
+  function rozetGuncelle() {
+    filtreRozetGuncelle("kayitliFiltreRozet", kategori.secili.size + sinif.secili.size);
+  }
+
+  $("kayitliFiltreTemizleBtn").addEventListener("click", () => {
+    kategori.temizle();
+    sinif.temizle();
+    rozetGuncelle();
+    ciz();
+  });
+
   const aramaInput = $("kayitliArama");
-  let filtre = "";
-  let kategoriFiltre = "";
-  let arama = "";
 
   function ciz() {
     const liste = kaydedilenleriYukle();
     const kutu = $("kayitliListe");
     kutu.innerHTML = "";
 
-    const sayilar = {};
-    liste.forEach((h) => { sayilar[h.sinif] = (sayilar[h.sinif] || 0) + 1; });
-    chips.forEach((chip) => {
-      const sinif = chip.dataset.sinif;
-      if (!sinif) { chip.textContent = `Tümü (${liste.length})`; return; }
-      chip.textContent = `${SINIF_ETIKET[sinif]} (${sayilar[sinif] || 0})`;
-    });
-
-    const katSayilar = {};
-    liste.forEach((h) => { if (h.kategori) katSayilar[h.kategori] = (katSayilar[h.kategori] || 0) + 1; });
-    kategoriChips.forEach((chip) => {
-      const kat = chip.dataset.kategori;
-      if (!kat) { chip.textContent = `Tüm Türler (${liste.length})`; return; }
-      chip.textContent = `${KATEGORI_ETIKET[kat] || kat} (${katSayilar[kat] || 0})`;
-    });
-
     $("kayitliKaydetBtn").disabled = liste.length === 0;
 
     let gorulen = liste;
-    if (filtre) gorulen = gorulen.filter((h) => h.sinif === filtre);
-    if (kategoriFiltre) gorulen = gorulen.filter((h) => h.kategori === kategoriFiltre);
-    if (arama) {
-      const q = arama.toLowerCase();
+    if (sinif.secili.size > 0) gorulen = gorulen.filter((h) => sinif.secili.has(h.sinif));
+    if (kategori.secili.size > 0) gorulen = gorulen.filter((h) => kategori.secili.has(h.kategori));
+    if (state.arama) {
+      const q = state.arama.toLowerCase();
       gorulen = gorulen.filter(
         (h) =>
           (h.baslikTr || "").toLowerCase().includes(q) ||
@@ -687,27 +760,9 @@ function kayitliPaneliOlustur() {
     gorulen.forEach((h, i) => kutu.appendChild(kartOlustur(h, i, detayGoster)));
   }
 
-  chips.forEach((chip) => {
-    chip.addEventListener("click", () => {
-      filtre = chip.dataset.sinif;
-      chips.forEach((c) => c.classList.remove("is-active"));
-      chip.classList.add("is-active");
-      ciz();
-    });
-  });
-
-  kategoriChips.forEach((chip) => {
-    chip.addEventListener("click", () => {
-      kategoriFiltre = chip.dataset.kategori;
-      kategoriChips.forEach((c) => c.classList.remove("is-active"));
-      chip.classList.add("is-active");
-      ciz();
-    });
-  });
-
   if (aramaInput) {
     aramaInput.addEventListener("input", () => {
-      arama = aramaInput.value.trim();
+      state.arama = aramaInput.value.trim();
       ciz();
     });
   }

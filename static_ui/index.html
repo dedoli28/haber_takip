@@ -23,7 +23,7 @@
       <svg id="themeIconMoon" width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <svg id="themeIconSun" width="18" height="18" viewBox="0 0 24 24" fill="none" style="display:none"><circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5v2.2M12 19.3v2.2M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
     </button>
-    <button class="btn btn-ghost" id="openSettings">
+    <button class="btn btn-ghost btn-sm" id="openSettings">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.7"/><path d="M19.4 13.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2.06 2.06 0 1 1-2.9 2.9l-.07-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V19.7a2.06 2.06 0 1 1-4.12 0v-.1a1.7 1.7 0 0 0-1.1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2.06 2.06 0 1 1-2.9-2.9l.06-.07a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H4.3a2.06 2.06 0 1 1 0-4.12h.1a1.7 1.7 0 0 0 1.55-1.1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2.06 2.06 0 1 1 2.9-2.9l.07.06a1.7 1.7 0 0 0 1.87.34H10.5a1.7 1.7 0 0 0 1-1.55V4.3a2.06 2.06 0 1 1 4.12 0v.1a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2.06 2.06 0 1 1 2.9 2.9l-.06.07a1.7 1.7 0 0 0-.34 1.87v.02a1.7 1.7 0 0 0 1.55 1h.1a2.06 2.06 0 1 1 0 4.12h-.1a1.7 1.7 0 0 0-1.55 1Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
       Ayarlar
     </button>
@@ -34,91 +34,123 @@
 
   <!-- ===================== HABERLER ===================== -->
   <section class="view is-active" id="view-haberler">
-    <div class="control-panel">
+    <div class="control-panel control-panel-compact">
       <div class="control-row">
-        <div class="field" style="flex:1;">
-          <label>Ara</label>
-          <input type="text" id="haberArama" placeholder="Başlık veya özette ara...">
+        <div class="field field-grow">
+          <input type="text" id="haberArama" placeholder="Ara...">
         </div>
+
+        <div class="filter-popover-wrap">
+          <button class="btn btn-outline btn-sm" id="haberFiltreBtn">
+            <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 5h16M7 12h10M10.5 19h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Filtreler
+            <span class="filter-badge" id="haberFiltreRozet" style="display:none;">0</span>
+          </button>
+          <div class="filter-popover" id="haberFiltrePopover">
+            <div class="filter-popover-section">
+              <div class="filter-popover-title">Tarih</div>
+              <div class="chip-row chip-row-tight" id="haberTarihChips">
+                <button class="chip chip-all is-active" data-tarih="">Tümü</button>
+                <button class="chip" data-tarih="bugun" style="--chip-c:#22c55e">Bugün</button>
+                <button class="chip" data-tarih="dun" style="--chip-c:#22c55e">Dün</button>
+              </div>
+            </div>
+            <div class="filter-popover-section">
+              <div class="filter-popover-title">Haber Türü <span class="filter-popover-hint">(birden çok seçilebilir)</span></div>
+              <div class="chip-row chip-row-tight" id="haberKategoriChips">
+                <button class="chip chip-all is-active" data-kategori="">Tümü</button>
+                <button class="chip" data-kategori="ana" style="--chip-c:#8b5cf6">Piyasa</button>
+                <button class="chip" data-kategori="hisse" style="--chip-c:#8b5cf6">Hisse</button>
+                <button class="chip" data-kategori="etf" style="--chip-c:#8b5cf6">ETF</button>
+                <button class="chip" data-kategori="kripto" style="--chip-c:#8b5cf6">Kripto</button>
+                <button class="chip" data-kategori="pazar_nabzi" style="--chip-c:#8b5cf6">Pazar Nabzı</button>
+                <button class="chip" data-kategori="blog" style="--chip-c:#8b5cf6">Blog</button>
+              </div>
+            </div>
+            <div class="filter-popover-section">
+              <div class="filter-popover-title">Önem <span class="filter-popover-hint">(birden çok seçilebilir)</span></div>
+              <div class="chip-row chip-row-tight" id="haberChips">
+                <button class="chip chip-all is-active" data-sinif="">Tümü</button>
+                <button class="chip" data-sinif="cok_onemli" style="--chip-c:#ef4444">Çok Önemli</button>
+                <button class="chip" data-sinif="onemli" style="--chip-c:#f59e0b">Önemli</button>
+                <button class="chip" data-sinif="bakmaya_deger" style="--chip-c:#3b82f6">Bakmaya Değer</button>
+                <button class="chip" data-sinif="onemsiz" style="--chip-c:#6b7280">Önemsiz</button>
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-sm filter-popover-clear" id="haberFiltreTemizleBtn">Filtreleri Temizle</button>
+          </div>
+        </div>
+
         <div class="field-spacer"></div>
-        <button class="btn btn-outline" id="haberYenileBtn">
-          <svg class="btn-icon" width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18 3v4h-4M6 21v-4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+
+        <button class="btn btn-outline btn-sm" id="haberSimdiTaraBtn" title="Finviz'i şimdi tara (birkaç saniye sürebilir)">
+          <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m14.5-6.5-2.1 2.1M8.6 15.4l-2.1 2.1m0-11 2.1 2.1m8.8 8.8 2.1 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="2"/></svg>
+          Şimdi Tara
+        </button>
+        <button class="btn btn-outline btn-sm" id="haberYenileBtn" title="Depodaki güncel listeyi getir">
+          <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18 3v4h-4M6 21v-4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Yenile
         </button>
-        <button class="btn btn-outline" id="haberKaydetBtn" disabled>Markdown İndir</button>
-        <button class="btn btn-primary" id="haberGunOzetBtn" disabled>Günü Özetle</button>
+        <button class="btn btn-outline btn-sm" id="haberKaydetBtn" disabled>Markdown</button>
+        <button class="btn btn-primary btn-sm" id="haberGunOzetBtn" disabled>Günü Özetle</button>
       </div>
       <p class="hint" id="haberSonTarama">Sistem arka planda otomatik olarak Finviz'i tarıyor. Son tarama: —</p>
-    </div>
-
-    <div class="chip-row" id="haberTarihChips">
-      <button class="chip chip-all is-active" data-tarih="">Tüm Tarihler</button>
-      <button class="chip" data-tarih="bugun" style="--chip-c:#22c55e">Bugün</button>
-      <button class="chip" data-tarih="dun" style="--chip-c:#22c55e">Dün</button>
-    </div>
-
-    <div class="chip-row" id="haberKategoriChips">
-      <button class="chip chip-all is-active" data-kategori="">Tüm Türler</button>
-      <button class="chip" data-kategori="ana" style="--chip-c:#8b5cf6">Piyasa</button>
-      <button class="chip" data-kategori="hisse" style="--chip-c:#8b5cf6">Hisse</button>
-      <button class="chip" data-kategori="etf" style="--chip-c:#8b5cf6">ETF</button>
-      <button class="chip" data-kategori="kripto" style="--chip-c:#8b5cf6">Kripto</button>
-      <button class="chip" data-kategori="pazar_nabzi" style="--chip-c:#8b5cf6">Pazar Nabzı</button>
-      <button class="chip" data-kategori="blog" style="--chip-c:#8b5cf6">Blog</button>
-    </div>
-
-    <div class="chip-row" id="haberChips">
-      <button class="chip chip-all is-active" data-sinif="">Tümü</button>
-      <button class="chip" data-sinif="cok_onemli" style="--chip-c:#ef4444">Çok Önemli</button>
-      <button class="chip" data-sinif="onemli" style="--chip-c:#f59e0b">Önemli</button>
-      <button class="chip" data-sinif="bakmaya_deger" style="--chip-c:#3b82f6">Bakmaya Değer</button>
-      <button class="chip" data-sinif="onemsiz" style="--chip-c:#6b7280">Önemsiz</button>
     </div>
 
     <div class="card-list" id="haberListe">
       <div class="empty-state">
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13Z" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 8.5h9M7.5 12h9M7.5 15.5h5.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-        <p>Henüz haber yok. Arka plan taraması ilk sonuçları getirdiğinde burada görünecek.<br>"Yenile"ye basarak da kontrol edebilirsin.</p>
+        <p>Henüz haber yok. Arka plan taraması ilk sonuçları getirdiğinde burada görünecek.<br>"Şimdi Tara" ya da "Yenile"ye basarak da kontrol edebilirsin.</p>
       </div>
     </div>
   </section>
 
   <!-- ===================== KAYDEDİLENLER ===================== -->
   <section class="view" id="view-kaydedilenler">
-    <div class="control-panel">
+    <div class="control-panel control-panel-compact">
       <div class="control-row">
-        <p class="hint" style="margin:0;">Kaydettiğin haber/blogların özeti, önem seviyesi ve (varsa) analizi burada saklanır — arka plan taraması bunları temizlemez.</p>
-        <div class="field-spacer"></div>
-        <button class="btn btn-outline" id="kayitliKaydetBtn" disabled>Markdown İndir</button>
-        <button class="btn btn-outline" id="kayitliTemizleBtn">Tümünü Temizle</button>
-      </div>
-    </div>
-
-    <div class="control-panel">
-      <div class="control-row">
-        <div class="field" style="flex:1;">
-          <label>Ara</label>
-          <input type="text" id="kayitliArama" placeholder="Başlık veya özette ara...">
+        <div class="field field-grow">
+          <input type="text" id="kayitliArama" placeholder="Ara...">
         </div>
+
+        <div class="filter-popover-wrap">
+          <button class="btn btn-outline btn-sm" id="kayitliFiltreBtn">
+            <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 5h16M7 12h10M10.5 19h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Filtreler
+            <span class="filter-badge" id="kayitliFiltreRozet" style="display:none;">0</span>
+          </button>
+          <div class="filter-popover" id="kayitliFiltrePopover">
+            <div class="filter-popover-section">
+              <div class="filter-popover-title">Haber Türü <span class="filter-popover-hint">(birden çok seçilebilir)</span></div>
+              <div class="chip-row chip-row-tight" id="kayitliKategoriChips">
+                <button class="chip chip-all is-active" data-kategori="">Tümü</button>
+                <button class="chip" data-kategori="ana" style="--chip-c:#8b5cf6">Piyasa</button>
+                <button class="chip" data-kategori="hisse" style="--chip-c:#8b5cf6">Hisse</button>
+                <button class="chip" data-kategori="etf" style="--chip-c:#8b5cf6">ETF</button>
+                <button class="chip" data-kategori="kripto" style="--chip-c:#8b5cf6">Kripto</button>
+                <button class="chip" data-kategori="pazar_nabzi" style="--chip-c:#8b5cf6">Pazar Nabzı</button>
+                <button class="chip" data-kategori="blog" style="--chip-c:#8b5cf6">Blog</button>
+              </div>
+            </div>
+            <div class="filter-popover-section">
+              <div class="filter-popover-title">Önem <span class="filter-popover-hint">(birden çok seçilebilir)</span></div>
+              <div class="chip-row chip-row-tight" id="kayitliChips">
+                <button class="chip chip-all is-active" data-sinif="">Tümü</button>
+                <button class="chip" data-sinif="cok_onemli" style="--chip-c:#ef4444">Çok Önemli</button>
+                <button class="chip" data-sinif="onemli" style="--chip-c:#f59e0b">Önemli</button>
+                <button class="chip" data-sinif="bakmaya_deger" style="--chip-c:#3b82f6">Bakmaya Değer</button>
+                <button class="chip" data-sinif="onemsiz" style="--chip-c:#6b7280">Önemsiz</button>
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-sm filter-popover-clear" id="kayitliFiltreTemizleBtn">Filtreleri Temizle</button>
+          </div>
+        </div>
+
+        <div class="field-spacer"></div>
+        <button class="btn btn-outline btn-sm" id="kayitliKaydetBtn" disabled>Markdown</button>
+        <button class="btn btn-outline btn-sm" id="kayitliTemizleBtn">Tümünü Temizle</button>
       </div>
-    </div>
-
-    <div class="chip-row" id="kayitliChips">
-      <button class="chip chip-all is-active" data-sinif="">Tümü</button>
-      <button class="chip" data-sinif="cok_onemli" style="--chip-c:#ef4444">Çok Önemli</button>
-      <button class="chip" data-sinif="onemli" style="--chip-c:#f59e0b">Önemli</button>
-      <button class="chip" data-sinif="bakmaya_deger" style="--chip-c:#3b82f6">Bakmaya Değer</button>
-      <button class="chip" data-sinif="onemsiz" style="--chip-c:#6b7280">Önemsiz</button>
-    </div>
-
-    <div class="chip-row" id="kayitliKategoriChips">
-      <button class="chip chip-all is-active" data-kategori="">Tüm Türler</button>
-      <button class="chip" data-kategori="ana" style="--chip-c:#8b5cf6">Piyasa</button>
-      <button class="chip" data-kategori="hisse" style="--chip-c:#8b5cf6">Hisse</button>
-      <button class="chip" data-kategori="etf" style="--chip-c:#8b5cf6">ETF</button>
-      <button class="chip" data-kategori="kripto" style="--chip-c:#8b5cf6">Kripto</button>
-      <button class="chip" data-kategori="pazar_nabzi" style="--chip-c:#8b5cf6">Pazar Nabzı</button>
-      <button class="chip" data-kategori="blog" style="--chip-c:#8b5cf6">Blog</button>
+      <p class="hint">Kaydettiğin haber/blogların özeti, önem seviyesi ve (varsa) analizi burada saklanır — arka plan taraması bunları temizlemez.</p>
     </div>
 
     <div class="card-list" id="kayitliListe">
