@@ -124,32 +124,64 @@ def siniflandirma_schema_olustur() -> dict:
     }
 
 
-def gun_ozeti_prompt_olustur(ogeler: list[dict]) -> str:
-    girdi_listesi = []
-    for o in ogeler:
-        girdi_listesi.append(f"[{o.get('sinif', '')}] {o['baslik']} — {o.get('ozet', '')}")
+KATEGORI_ETIKET = {
+    "ana": "Piyasa Haberleri",
+    "hisse": "Hisse Senedi Haberleri",
+    "etf": "ETF Haberleri",
+    "kripto": "Kripto Haberleri",
+    "pazar_nabzi": "Pazar Nabzı",
+    "blog": "Bloglar",
+}
 
-    return f"""Sen deneyimli bir borsa/finans analistisin. Aşağıda bugün
-sınıflandırılmış ve özetlenmiş haberlerin bir listesi var (köşeli parantez
-içinde önem derecesi ile birlikte).
 
-Bu haberlere dayanarak günün genel piyasa görünümünü özetleyen 4-6 cümlelik
-TÜRKÇE bir "günün özeti" yaz. Özellikle "cok_onemli" ve "onemli" olarak
-işaretlenmiş haberlere odaklan, günün baskın temasını/yönünü (ör. hangi
-sektörler öne çıktı, genel risk iştahı nasıldı, dikkat çeken makro
-gelişmeler) vurgula. Akıcı bir paragraf ya da kısa maddeler halinde yaz.
+def gun_ozeti_prompt_olustur(kategorili_ogeler: dict[str, list[dict]]) -> str:
+    bolumler = []
+    for kategori, ogeler in kategorili_ogeler.items():
+        if not ogeler:
+            continue
+        etiket = KATEGORI_ETIKET.get(kategori, kategori)
+        satirlar = [f"  [{o.get('sinif', '')}] {o.get('baslik_tr') or o['baslik']} — {o.get('ozet', '')}" for o in ogeler]
+        bolumler.append(f'Kategori anahtari: "{kategori}" ({etiket})\n' + "\n".join(satirlar))
+
+    return f"""Sen deneyimli bir borsa/finans analistisin. Aşağıda bugünün
+sınıflandırılmış ve özetlenmiş haberleri, haber TÜRÜNE göre gruplanmış halde
+listelenmiş (köşeli parantez içinde önem derecesiyle birlikte).
+
+Şunu yap:
+1) Her haber türü için ayrı bir özet üret ("kategoriler" listesi). Her öge
+   {{kategori, ozet}} olsun: "kategori" alanına yukarıda verilen kategori
+   anahtarını (ör. "ana", "hisse") aynen yaz; "ozet" alanına o türdeki
+   haberlere dayanarak 2-4 cümlelik TÜRKÇE bir özet yaz, özellikle
+   "cok_onemli" ve "onemli" olanlara odaklan. Hiç haberi olmayan türler
+   için öge üretme.
+2) En sonda tüm türleri kapsayan, günün genel piyasa görünümünü özetleyen
+   4-6 cümlelik TÜRKÇE bir "genel_ozet" yaz: günün baskın temasını/yönünü,
+   öne çıkan sektörleri, genel risk iştahını vurgula.
 
 Haberler:
-{chr(10).join(girdi_listesi)}
+{chr(10).join(bolumler)}
 
-Sadece "ozet" alanını içeren JSON dön."""
+Sadece "kategoriler" (liste) ve "genel_ozet" alanlarını içeren JSON dön."""
 
 
 def gun_ozeti_schema_olustur() -> dict:
     return {
         "type": "OBJECT",
-        "properties": {"ozet": {"type": "STRING"}},
-        "required": ["ozet"],
+        "properties": {
+            "kategoriler": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "kategori": {"type": "STRING"},
+                        "ozet": {"type": "STRING"},
+                    },
+                    "required": ["kategori", "ozet"],
+                },
+            },
+            "genel_ozet": {"type": "STRING"},
+        },
+        "required": ["kategoriler", "genel_ozet"],
     }
 
 

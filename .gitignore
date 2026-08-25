@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .vercel
 server.log
+.env
+.env.*
