@@ -613,8 +613,12 @@ function haberPaneliOlustur() {
       const bas = saatBaslangic.value !== "" ? parseInt(saatBaslangic.value, 10) : 0;
       const bit = saatBitis.value !== "" ? parseInt(saatBitis.value, 10) : 23;
       gorulen = gorulen.filter((h) => {
-        if (!h.ilkGorulme) return false;
-        const saat = new Date(h.ilkGorulme).getHours();
+        // "saat" alani sunucuda Istanbul saatine cevrilmis "HH:MM" bicimindeyse
+        // guvenilir sekilde filtrelenebilir; eski/saatsiz kayitlarda (ör. "Aug-19")
+        // bu bicimde olmaz, onlar saat araligi seciliyken listeden cikarilir.
+        const m = /^(\d{2}):\d{2}$/.exec(h.saat || "");
+        if (!m) return false;
+        const saat = parseInt(m[1], 10);
         return bas <= bit ? (saat >= bas && saat <= bit) : (saat >= bas || saat <= bit);
       });
     }
