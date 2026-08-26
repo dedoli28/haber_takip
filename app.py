@@ -14,6 +14,10 @@ Mimari:
     tarih/tur/onem'e gore kendi tarafinda filtreler).
   - /api/analiz, /api/gun-ozeti: istege bagli AI islemleri; sunucunun kendi
     GEMINI_API_KEY'ini kullanir (artik istemciden anahtar alinmiyor).
+  - /api/gun-sonu: HARICI ikinci bir cron-job.org gorevi tarafindan gunde bir
+    kez cagrilir; her aliciya gunun ozetini + esigine hic ulasmayip
+    bildirilmemis kalan haberleri tek e-postada gonderir. POLL_SECRET ile
+    korunur.
   - /api/ayarlar: bildirim e-postalarini okur/yazar.
 
 Statik arayuz (static_ui/) ayni uygulama uzerinden servis edilir.
@@ -33,6 +37,7 @@ import email_client
 import redis_store
 from finviz_scraper import tum_turleri_cek
 from gemini_client import (
+    KATEGORI_ETIKET,
     analiz_prompt_olustur,
     analiz_schema_olustur,
     gemini_json_iste,
@@ -212,6 +217,17 @@ async def analiz(request: Request):
     return {"ok": True, "analiz": sonuc.get("analiz", "")}
 
 
+def _gun_ozeti_olustur(depo: dict, api_key: str) -> dict:
+    kategorili: dict[str, list[dict]] = {}
+    for o in depo.values():
+        kategorili.setdefault(o.get("kategori", "ana"), []).append(o)
+
+    prompt = gun_ozeti_prompt_olustur(kategorili)
+    schema = gun_ozeti_schema_olustur()
+    sonuc = gemini_json_iste(prompt, schema, api_key, GEMINI_MODEL)
+    return {"kategoriler": sonuc.get("kategoriler", []), "genelOzet": sonuc.get("genel_ozet", "")}
+
+
 @app.post("/api/gun-ozeti")
 def gun_ozeti():
     api_key = _gemini_anahtari()
@@ -225,19 +241,10 @@ def gun_ozeti():
     if not depo:
         return JSONResponse({"ok": False, "hata": "Özetlenecek haber yok."}, status_code=400)
 
-    kategorili: dict[str, list[dict]] = {}
-    for o in depo.values():
-        kategorili.setdefault(o.get("kategori", "ana"), []).append(o)
-
-    prompt = gun_ozeti_prompt_olustur(kategorili)
-    schema = gun_ozeti_schema_olustur()
-
     try:
-        sonuc = gemini_json_iste(prompt, schema, api_key, GEMINI_MODEL)
+        return {"ok": True, **_gun_ozeti_olustur(depo, api_key)}
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
-
-    return {"ok": True, "kategoriler": sonuc.get("kategoriler", []), "genelOzet": sonuc.get("genel_ozet", "")}
 
 
 def _siniflandir_grup(grup: list[dict], api_key: str) -> str | None:
@@ -290,6 +297,47 @@ def _esik_email_html(tetiklenen: dict[str, list[str]], depo: dict) -> str:
         if gizli_sayisi > 0:
             parcalar.append(f"<li><em>+ {gizli_sayisi} haber daha (uygulamadan görüntüleyebilirsiniz)</em></li>")
         parcalar.append("</ul>")
+    return "\n".join(parcalar)
+
+
+def _gun_sonu_email_html(gun_ozeti: dict, bekleyen: dict, depo: dict) -> str:
+    """Gun sonu e-postasinin govdesini olusturur: once haber turu basina
+    ozet + genel ozet, sonra (varsa) o gun esige hic ulasmadigi icin
+    bildirilmemis kalan haberlerin listesi."""
+    parcalar = ["<h2>Haber Takip Platformu — Günün Özeti</h2>"]
+
+    for k in gun_ozeti.get("kategoriler", []):
+        etiket = KATEGORI_ETIKET.get(k.get("kategori"), k.get("kategori"))
+        parcalar.append(f"<h3>{etiket}</h3><p>{k.get('ozet', '')}</p>")
+
+    if gun_ozeti.get("genelOzet"):
+        parcalar.append(f"<h3>Genel Özet</h3><p>{gun_ozeti['genelOzet']}</p>")
+
+    toplam_bekleyen = sum(len(bekleyen.get(s, [])) for s in SINIF_ESIK_LISTESI)
+    if toplam_bekleyen > 0:
+        parcalar.append(
+            "<hr><h3>Eşiğe Ulaşmadığı İçin Daha Önce Gönderilmeyen Haberler</h3>"
+            "<p>Bu haberler eşiğinize ulaşmadığı için ayrı bir bildirim tetiklemedi, "
+            "ama gün bittiği için burada topluca gönderiliyor:</p>"
+        )
+        for s in SINIF_ESIK_LISTESI:
+            urller = bekleyen.get(s, [])
+            if not urller:
+                continue
+            gosterilen = urller[-EPOSTA_SINIF_BASINA_AZAMI:]
+            gizli_sayisi = len(urller) - len(gosterilen)
+            parcalar.append(f"<h4>{SINIF_ETIKET_TR.get(s, s)} ({len(urller)})</h4><ul>")
+            for url in gosterilen:
+                o = depo.get(url)
+                if not o:
+                    continue
+                baslik = o.get("baslikTr") or o.get("baslik")
+                ozet = o.get("ai_ozet", "")
+                parcalar.append(f'<li><a href="{url}">{baslik}</a><br><small>{ozet}</small></li>')
+            if gizli_sayisi > 0:
+                parcalar.append(f"<li><em>+ {gizli_sayisi} haber daha</em></li>")
+            parcalar.append("</ul>")
+
     return "\n".join(parcalar)
 
 
@@ -430,6 +478,67 @@ def tara(request: Request):
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=e.status_code)
 
 
+@app.post("/api/gun-sonu")
+def gun_sonu(request: Request):
+    """Gunun sonunda, HARICI ikinci bir cron-job.org gorevi tarafindan gunde
+    bir kez cagrilir (ornegin 23:45): her aliciya (1) o gunku genel haber
+    ozetini VE (2) esigine hic ulasmadigi icin o gune kadar ayrica
+    bildirilmemis kalan haberleri TEK bir e-postada gonderir, ardindan o
+    alicinin sayaclarini sifirlar (yeni gune temiz baslar). /api/tara ile
+    ayni POLL_SECRET korumasini kullanir."""
+    beklenen_sir = os.environ.get("POLL_SECRET")
+    if beklenen_sir:
+        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
+        if gelen_sir != beklenen_sir:
+            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+
+    api_key = _gemini_anahtari()
+    if not api_key:
+        return JSONResponse({"ok": False, "hata": "Sunucuda GEMINI_API_KEY tanımlı değil."}, status_code=500)
+
+    try:
+        depo = redis_store.depo_yukle()
+        ayarlar = redis_store.ayarlar_yukle()
+        bekleyenler_tum = redis_store.sayaclari_yukle()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    aliciler = [a for a in ayarlar.get("alicilar", []) if a.get("eposta")]
+    if not aliciler:
+        return {"ok": True, "gonderilenSayisi": 0}
+
+    gun_ozeti = {"kategoriler": [], "genelOzet": ""}
+    if depo:
+        try:
+            gun_ozeti = _gun_ozeti_olustur(depo, api_key)
+        except Exception as e:  # noqa: BLE001
+            gun_ozeti = {"kategoriler": [], "genelOzet": f"Gün özeti oluşturulamadı: {e}"}
+
+    hatalar: list[str] = []
+    gonderilen = 0
+
+    if not email_client.yapilandirilmis_mi():
+        hatalar.append("GMAIL_ADDRESS / GMAIL_APP_PASSWORD tanımlı değil, e-posta gönderilemedi.")
+    else:
+        for alici in aliciler:
+            eposta = alici["eposta"]
+            bekleyen = bekleyenler_tum.get(eposta, {})
+            html = _gun_sonu_email_html(gun_ozeti, bekleyen, depo)
+            try:
+                email_client.eposta_gonder([eposta], "Haber Takip Platformu - Günün Özeti", html)
+                bekleyenler_tum[eposta] = {s: [] for s in SINIF_ESIK_LISTESI}
+                gonderilen += 1
+            except Exception as e:  # noqa: BLE001
+                hatalar.append(f"{eposta}: e-posta gönderilemedi: {e}")
+
+    try:
+        redis_store.sayaclari_kaydet(bekleyenler_tum)
+    except Exception as e:  # noqa: BLE001
+        hatalar.append(str(e))
+
+    return {"ok": True, "gonderilenSayisi": gonderilen, "hatalar": hatalar}
+
+
 @app.post("/api/sentetik-haber")
 def sentetik_haber_ekle(request: Request):
     """Test amaclidir: gercek Finviz taramasi ya da Gemini siniflandirmasi
@@ -492,6 +601,34 @@ def sentetik_haber_ekle(request: Request):
     hatalar = _esik_takibi_ve_bildirim(yeni_ogeler, depo)
 
     return {"ok": True, "eklenenSayisi": len(yeni_ogeler), "sinif": sinif, "hatalar": hatalar}
+
+
+@app.post("/api/sentetik-haber-temizle")
+def sentetik_haber_temizle(request: Request):
+    """/api/sentetik-haber ile eklenen tum sahte test haberlerini
+    (kaynak == 'sentetik-test' olanlari) depodan hemen siler; bir sonraki
+    gercek taramayi beklemek istemeyenler icin. Ayni POLL_SECRET korumasi."""
+    beklenen_sir = os.environ.get("POLL_SECRET")
+    if beklenen_sir:
+        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
+        if gelen_sir != beklenen_sir:
+            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+
+    try:
+        depo = redis_store.depo_yukle()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    silinecek_urller = [url for url, o in depo.items() if o.get("kaynak") == "sentetik-test"]
+    for url in silinecek_urller:
+        del depo[url]
+
+    try:
+        redis_store.depo_kaydet(depo)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    return {"ok": True, "silinenSayisi": len(silinecek_urller)}
 
 
 _ui_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static_ui")
