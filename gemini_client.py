@@ -26,7 +26,11 @@ def gemini_json_iste(prompt: str, response_schema: dict, api_key: str, model: st
     url = GEMINI_ENDPOINT.format(model=model)
     son_hata: Exception | None = None
 
-    for deneme in range(2):
+    # 429 (istek limiti) ve 5xx (gecici sunucu yogunlugu/erisilemezligi, ör.
+    # "high demand" 503) gecici sayilir ve tekrar denenir; digerleri kalicidir.
+    GECICI_HATA_KODLARI = {500, 502, 503, 504}
+
+    for deneme in range(3):
         try:
             resp = requests.post(url, params={"key": api_key}, json=body, timeout=25)
         except Exception as e:  # noqa: BLE001
@@ -41,6 +45,11 @@ def gemini_json_iste(prompt: str, response_schema: dict, api_key: str, model: st
                     "Kota genelde 24 saatte sıfırlanır; farklı bir API anahtarı/model de deneyebilirsiniz."
                 )
             son_hata = RuntimeError(f"Gemini istek limitine ulaşıldı (429): {resp.text[:200]}")
+            time.sleep(2 * (deneme + 1))
+            continue
+
+        if resp.status_code in GECICI_HATA_KODLARI:
+            son_hata = RuntimeError(f"Gemini geçici olarak yoğun/erişilemez ({resp.status_code}): {resp.text[:200]}")
             time.sleep(2 * (deneme + 1))
             continue
 

@@ -466,6 +466,24 @@ def _tara_calistir() -> dict:
         if hata:
             siniflandirma_hatalari.append(hata)
 
+    # Farkli kaynaklarin ORIJINAL basliklari farkli olsa bile (ör. ayni
+    # olayi degisik sekilde anlatan iki site), Gemini'nin TURKCE cevirisi
+    # ayni/cok benzer metne yakinsayabiliyor (ozellikle Pazar Nabzi'nin
+    # kendi ozetiyle gercek bir makalenin ayni olayi anlatmasi durumunda).
+    # Bu yuzden siniflandirmadan SONRA, artik elde olan baslikTr'ye gore
+    # ikinci bir tekillestirme yapilir.
+    mevcut_baslik_tr = {(o.get("baslikTr") or "").strip().lower() for o in depo.values() if o.get("baslikTr")}
+    gorulen_yeni_baslik_tr: set[str] = set()
+    nihai_yeni_ogeler: list[dict] = []
+    for o in yeni_ogeler:
+        b = (o.get("baslikTr") or o.get("baslik") or "").strip().lower()
+        if b and (b in mevcut_baslik_tr or b in gorulen_yeni_baslik_tr):
+            continue
+        if b:
+            gorulen_yeni_baslik_tr.add(b)
+        nihai_yeni_ogeler.append(o)
+    yeni_ogeler = nihai_yeni_ogeler
+
     simdi = datetime.now(timezone.utc).isoformat()
     for o in yeni_ogeler:
         o["ilkGorulme"] = simdi
@@ -512,6 +530,45 @@ def tara(request: Request):
         return _tara_calistir()
     except TaramaHatasi as e:
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=e.status_code)
+
+
+@app.post("/api/depo-tekillestir")
+def depo_tekillestir(request: Request):
+    """Yeni tekillestirme mantigi devreye girmeden ONCE depoya girmis olan,
+    ayni (Turkce cevrilmis) basliga sahip mukerrer haberleri hemen temizler
+    (en once gorulen kopya tutulur). /api/tara ile ayni POLL_SECRET korumasini
+    kullanir. Sadece bir kereye mahsus, gecmisi temizlemek icindir."""
+    beklenen_sir = os.environ.get("POLL_SECRET")
+    if beklenen_sir:
+        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
+        if gelen_sir != beklenen_sir:
+            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+
+    try:
+        depo = redis_store.depo_yukle()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    sirali = sorted(depo.values(), key=lambda o: o.get("ilkGorulme", ""))
+    gorulen_baslik: set[str] = set()
+    silinecek_urller: list[str] = []
+    for o in sirali:
+        b = (o.get("baslikTr") or o.get("baslik") or "").strip().lower()
+        if b and b in gorulen_baslik:
+            silinecek_urller.append(o["url"])
+            continue
+        if b:
+            gorulen_baslik.add(b)
+
+    for url in silinecek_urller:
+        del depo[url]
+
+    try:
+        redis_store.depo_kaydet(depo)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    return {"ok": True, "silinenSayisi": len(silinecek_urller), "kalanSayisi": len(depo)}
 
 
 @app.post("/api/gun-sonu")
