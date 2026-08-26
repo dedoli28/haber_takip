@@ -360,43 +360,6 @@ function ayarlarBaslat() {
   $("epostaInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") epostaEkle();
   });
-
-  async function bakimIstegiCalistir(btn, url, basariMesajFn) {
-    if (btn.disabled) return;
-    const oncekiMetin = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = "Temizleniyor...";
-    try {
-      const resp = await fetch(url, { method: "POST" });
-      const yanit = await resp.json();
-      if (yanit.ok) {
-        toast(basariMesajFn(yanit), "ok");
-      } else {
-        toast(yanit.hata || "İşlem başarısız.", "error");
-      }
-    } catch (e) {
-      toast("Beklenmeyen hata: " + e, "error");
-    } finally {
-      btn.disabled = false;
-      btn.textContent = oncekiMetin;
-    }
-  }
-
-  $("mukerrerTemizleBtn").addEventListener("click", () => {
-    bakimIstegiCalistir(
-      $("mukerrerTemizleBtn"),
-      "/api/depo-tekillestir",
-      (y) => y.silinenSayisi > 0 ? `${y.silinenSayisi} mükerrer haber temizlendi.` : "Mükerrer haber bulunamadı."
-    );
-  });
-
-  $("bozukTemizleBtn").addEventListener("click", () => {
-    bakimIstegiCalistir(
-      $("bozukTemizleBtn"),
-      "/api/basarisiz-siniflandirmalari-temizle",
-      (y) => y.silinenSayisi > 0 ? `${y.silinenSayisi} bozuk kayıt temizlendi, bir sonraki taramada tekrar denenecek.` : "Bozuk kayıt bulunamadı."
-    );
-  });
 }
 
 /* ===================== Kaydedilenler (localStorage) ===================== */
