@@ -25,6 +25,8 @@ SAYAC_KEY = "htp:sayaclar"
 SON_TARAMA_KEY = "htp:son_tarama"
 SON_HATALAR_KEY = "htp:son_hatalar"
 SON_GONDERIM_KEY = "htp:son_gonderim"
+BEKLEYEN_SINIFLANDIRMA_KEY = "htp:bekleyen_siniflandirma"
+SON_SINIFLANDIRMA_KEY = "htp:son_siniflandirma"
 
 SINIF_ESIK_LISTESI = ["cok_onemli", "onemli", "bakmaya_deger"]
 
@@ -132,3 +134,23 @@ def son_gonderim_yukle() -> dict:
 
 def son_gonderim_kaydet(son_gonderim: dict) -> None:
     _set_json(SON_GONDERIM_KEY, son_gonderim)
+
+
+def bekleyen_siniflandirma_yukle() -> dict:
+    """Finviz'den cekilmis ama henuz Gemini ile siniflandirilmamis haberlerin
+    URL -> ham oge sozlugu (bir bekleme kuyrugu). Tarama (hizli, /api/haber-cek)
+    ve siniflandirma (yavas, Gemini'ye bagli, /api/haber-siniflandir) ayri ayri
+    tetiklenebilsin ve birbirini zaman asimina ugratmasin diye ayrilmistir."""
+    return _get_json(BEKLEYEN_SINIFLANDIRMA_KEY, {})
+
+
+def bekleyen_siniflandirma_kaydet(kuyruk: dict) -> None:
+    _set_json(BEKLEYEN_SINIFLANDIRMA_KEY, kuyruk)
+
+
+def son_siniflandirma_yukle() -> str | None:
+    return _get_ham(SON_SINIFLANDIRMA_KEY)
+
+
+def son_siniflandirma_kaydet(iso_zaman: str) -> None:
+    _set_ham(SON_SINIFLANDIRMA_KEY, iso_zaman)

@@ -2,13 +2,21 @@
 Haber Takip Platformu - Vercel icin web surumu (v2: surekli izleme).
 
 Mimari:
-  - /api/tara: disaridan (GitHub Actions/cron-job.org gibi bir servisten) her
-    15 dakikada bir cagrilir, POLL_SECRET ile korunur. Finviz'deki TUM haber
-    turlerini + bloglari PARALEL ceker, daha once gorulmemis olanlari (bir
-    seferde en fazla MAX_YENI_HABER_BASINA_TARAMA kadar, kategoriler arasinda
-    adil dagitarak, zaman asimini asmamak icin) Gemini ile
-    siniflandirir/ozetler/Turkce'ye cevirir, Upstash Redis'teki kalici depoya
-    ekler; artik Finviz'de olmayanlari depodan siler.
+  - Tarama iki BAGIMSIZ adima bolunmustur (biri yavaslasa/zaman asimina
+    ugrasa bile digerini etkilemesin, ikisi de kendi cron'undan ayri ayri
+    tetiklenebilsin diye):
+      - /api/haber-cek: Finviz'deki TUM haber turlerini + bloglari PARALEL
+        ceker (Gemini'ye HIC dokunmaz, ~2sn surer), daha once gorulmemis
+        olanlari Upstash Redis'teki bekleme kuyruguna (htp:bekleyen_siniflandirma)
+        ekler; artik Finviz'de olmayanlari depodan siler.
+      - /api/haber-siniflandir: kuyruktan en fazla
+        MAX_ISLENECEK_SINIFLANDIRMA_BASINA kadar haberi (kategoriler arasinda
+        adil dagitarak) Gemini ile siniflandirir/ozetler/Turkce'ye cevirir,
+        kalici depoya ekler; kuyruktaki fazlasi bir sonraki cagriya kalir.
+      - /api/tara: geriye donuk uyumluluk/manuel test icin ikisini sirayla
+        cagiran bir kisayoldur.
+    Ucu de disaridan (cron-job.org gibi bir servisten) periyodik cagrilir,
+    POLL_SECRET ile korunur.
   - Esik bildirimleri: esikler artik SABIT (ESIKLER: 10 cok onemli / 25 onemli
     / 50 bakmaya deger), kullanici tarafindan degistirilemez. Gece sessiz
     saatlerinde (00:00-06:00, Europe/Istanbul) esik e-postasi gonderilmez,
@@ -69,11 +77,11 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
 # ozetlemek epey token demek). Daha kucuk gruplar hem daha hizli doner hem
 # de cron-job.org'un sabit 30 saniyelik siniri icinde kalma sansini artirir.
 TARA_GRUP_BOYUTU = 10
-# Bir /api/tara cagrisinda siniflandirilacak azami yeni haber sayisi. Finviz
-# taramasi + Gemini siniflandirmasi cron/Vercel zaman asimini asmasin diye
-# sinirlandirilir; kapasiteyi asan yeni haberler depoya eklenmez, bu yuzden
-# bir sonraki taramada tekrar "yeni" olarak gorulup sirayla islenir.
-MAX_YENI_HABER_BASINA_TARAMA = 20
+# Bir /api/haber-siniflandir cagrisinda siniflandirilacak azami haber
+# sayisi: TAM OLARAK tek bir Gemini grubuna esitlenir, boylece tek cagri
+# cron-job.org'un sabit 30 saniyelik siniri icinde guvenle kalir. Kuyruktaki
+# fazlasi kuyrukta kalir, bir sonraki cagrida sirayla islenir.
+MAX_ISLENECEK_SINIFLANDIRMA_BASINA = TARA_GRUP_BOYUTU
 SINIF_ESIK_LISTESI = redis_store.SINIF_ESIK_LISTESI
 SINIF_ETIKET_TR = {"cok_onemli": "Çok Önemli", "onemli": "Önemli", "bakmaya_deger": "Bakmaya Değer"}
 
@@ -175,6 +183,11 @@ def durum():
             }
         )
 
+    try:
+        kuyruktaBekleyen = len(redis_store.bekleyen_siniflandirma_yukle())
+    except Exception:  # noqa: BLE001
+        kuyruktaBekleyen = None
+
     return {
         "ok": True,
         "esikler": ESIKLER,
@@ -182,6 +195,8 @@ def durum():
         "aliciDurumlari": alici_durumlari,
         "epostaYapilandirilmisMi": email_client.yapilandirilmis_mi(),
         "sonTarama": redis_store.son_tarama_yukle(),
+        "sonSiniflandirma": redis_store.son_siniflandirma_yukle(),
+        "kuyruktaBekleyenSayisi": kuyruktaBekleyen,
         "sonHatalar": redis_store.son_hatalar_yukle(),
         "istanbulSaati": _istanbul_saati().isoformat(timespec="milliseconds"),
     }
@@ -273,8 +288,9 @@ def gun_ozeti():
 def _siniflandir_grup(grup: list[dict], api_key: str) -> str | None:
     """Basarisiz olan ogeleri sahte/bozuk bir siniflandirmayla (cevrilmemis
     baslik, bos ozet) kalici olarak isaretlemek YERINE '_siniflandirilamadi'
-    ile bayraklar; bu ogeler _tara_calistir tarafindan depoya HIC YAZILMAZ,
-    boylece bir sonraki taramada tekrar 'yeni' sayilip yeniden denenirler."""
+    ile bayraklar; bu ogeler _siniflandir_calistir tarafindan depoya HIC
+    YAZILMAZ, bunun yerine kuyruga geri konup bir sonraki siniflandirma
+    cagrisinda yeniden denenirler."""
     prompt = siniflandirma_prompt_olustur(grup)
     schema = siniflandirma_schema_olustur()
     try:
@@ -467,15 +483,11 @@ class TaramaHatasi(Exception):
         self.status_code = status_code
 
 
-def _tara_calistir() -> dict:
-    """Tek bir tarama dongusu calistirir (hem cron hem manuel tetikleme
-    tarafindan paylasilir): Finviz'i ceker, yeni ogeleri siniflandirir,
-    depoyu gunceller, esik/e-posta kontrolu yapar. Basarili durumda yanit
-    sozlugunu dondurur, hata durumunda TaramaHatasi firlatir."""
-
-    api_key = _gemini_anahtari()
-    if not api_key:
-        raise TaramaHatasi("Sunucuda GEMINI_API_KEY tanımlı değil.", 500)
+def _haber_cek_calistir() -> dict:
+    """HIZLI adim: Finviz'i PARALEL tarar, Gemini'ye HIC dokunmaz (~2sn).
+    Daha once gorulmemis ogeleri siniflandirma bekleme kuyruguna ekler; artik
+    Finviz'de olmayanlari depodan (ve kuyruktan) siler. Basarili durumda
+    yanit sozlugunu dondurur, hata durumunda TaramaHatasi firlatir."""
 
     try:
         guncel_ogeler, tarama_hatalari = tum_turleri_cek()
@@ -484,6 +496,7 @@ def _tara_calistir() -> dict:
 
     try:
         depo = redis_store.depo_yukle()
+        kuyruk = redis_store.bekleyen_siniflandirma_yukle()
     except Exception as e:  # noqa: BLE001
         raise TaramaHatasi(str(e)) from e
 
@@ -492,31 +505,95 @@ def _tara_calistir() -> dict:
     # Ayni haber farkli kategorilerde (ör. Piyasa + Pazar Nabzi) ya da
     # taramalar arasinda degisen takip/yonlendirme parametreleriyle farkli
     # URL'lerle gorunebiliyor. Sadece URL'e gore tekillestirmek bu durumda
-    # ayni haberi tekrar tekrar "yeni" sayip bildirimlerde/e-postada birebir
-    # tekrarlanmasina yol aciyordu; bu yuzden basliga gore de tekillestirilir.
+    # ayni haberi tekrar tekrar "yeni" sayip kuyruga/e-postaya birebir
+    # tekrarlanmasina yol aciyordu; bu yuzden basliga gore de (hem depoda hem
+    # zaten kuyrukta bekleyenler icinde) tekillestirilir.
     mevcut_basliklar = {(o.get("baslik") or "").strip().lower() for o in depo.values() if o.get("baslik")}
-    tum_yeni_ogeler: list[dict] = []
-    gorulen_yeni_baslik: set[str] = set()
+    kuyruktaki_basliklar = {(o.get("baslik") or "").strip().lower() for o in kuyruk.values() if o.get("baslik")}
+    yeni_kuyruklanan = 0
     for o in guncel_ogeler:
-        if o["url"] in depo:
+        if o["url"] in depo or o["url"] in kuyruk:
             continue
         baslik_norm = (o.get("baslik") or "").strip().lower()
-        if baslik_norm and (baslik_norm in mevcut_basliklar or baslik_norm in gorulen_yeni_baslik):
+        if baslik_norm and (baslik_norm in mevcut_basliklar or baslik_norm in kuyruktaki_basliklar):
             continue
         if baslik_norm:
-            gorulen_yeni_baslik.add(baslik_norm)
-        tum_yeni_ogeler.append(o)
+            kuyruktaki_basliklar.add(baslik_norm)
+        kuyruk[o["url"]] = o
+        yeni_kuyruklanan += 1
 
-    yeni_ogeler = _kategoriler_arasi_adil_sec(tum_yeni_ogeler, MAX_YENI_HABER_BASINA_TARAMA)
-    isleme_alinmayan_sayisi = len(tum_yeni_ogeler) - len(yeni_ogeler)
+    silinen_urller = [url for url in depo.keys() if url not in guncel_url_seti]
+    for url in silinen_urller:
+        del depo[url]
+    # Kuyrukta bekleyip artik Finviz'in guncel listesinde olmayan (ör. sayfa
+    # kaydiginda dusmus) ogeler de ayni sekilde ayiklanir.
+    kuyruk = {url: o for url, o in kuyruk.items() if url in guncel_url_seti}
 
-    # ONEMLI: her Finviz kategorisi kendi haberlerini 0'dan baslayan kendi
-    # id numaralariyla ayristirir (ör. Piyasa'daki 1. haber id="0", Hisse'deki
-    # 1. haber de id="0"). Farkli kategorilerden gelen haberler ayni
-    # siniflandirma grubunda bulusunca, Gemini'nin sonucu YANLIS haberle
-    # eslesiyordu (ör. bir haberin Turkce basligi baska, alakasiz bir haberin
-    # ozeti oluyordu). Gruplamadan HEMEN once, tum sette KESIN benzersiz
-    # id'ler atanarak bu carpraz eslesme onlenir.
+    simdi = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    try:
+        redis_store.depo_kaydet(depo)
+        redis_store.bekleyen_siniflandirma_kaydet(kuyruk)
+        redis_store.son_tarama_kaydet(simdi)
+    except Exception as e:  # noqa: BLE001
+        raise TaramaHatasi(str(e)) from e
+
+    try:
+        onceki_hatalar = redis_store.son_hatalar_yukle()
+        if not isinstance(onceki_hatalar, dict):
+            onceki_hatalar = {}
+        onceki_hatalar["tarama"] = tarama_hatalari
+        redis_store.son_hatalar_kaydet(onceki_hatalar)
+    except Exception:  # noqa: BLE001
+        pass  # tanilama amacli, taramayi basarisiz saymaya degmez
+
+    return {
+        "ok": True,
+        "yeniKuyruklanan": yeni_kuyruklanan,
+        "silinenSayisi": len(silinen_urller),
+        "kuyruktaBekleyenToplam": len(kuyruk),
+        "toplamDepo": len(depo),
+        "taramaHatalari": tarama_hatalari,
+    }
+
+
+def _siniflandir_calistir() -> dict:
+    """YAVAS adim: bekleme kuyrugundan en fazla
+    MAX_ISLENECEK_SINIFLANDIRMA_BASINA kadar haberi (kategoriler arasinda
+    adil dagitarak) Gemini ile siniflandirir/ozetler/Turkce'ye cevirir,
+    depoya ekler, esik/e-posta kontrolunu tetikler. Tek cagri TEK bir Gemini
+    grubuyla sinirlandirilir, boylece suresi ongorulebilir kalir (cron-job.org
+    30sn siniri icinde). Basarili durumda yanit sozlugunu dondurur, hata
+    durumunda TaramaHatasi firlatir."""
+
+    api_key = _gemini_anahtari()
+    if not api_key:
+        raise TaramaHatasi("Sunucuda GEMINI_API_KEY tanımlı değil.", 500)
+
+    try:
+        depo = redis_store.depo_yukle()
+        kuyruk = redis_store.bekleyen_siniflandirma_yukle()
+    except Exception as e:  # noqa: BLE001
+        raise TaramaHatasi(str(e)) from e
+
+    if not kuyruk:
+        return {
+            "ok": True,
+            "islenenSayisi": 0,
+            "siniflandirilamayanSayisi": 0,
+            "kuyruktaKalanSayisi": 0,
+            "toplamDepo": len(depo),
+            "siniflandirmaHatalari": [],
+        }
+
+    yeni_ogeler = _kategoriler_arasi_adil_sec(list(kuyruk.values()), MAX_ISLENECEK_SINIFLANDIRMA_BASINA)
+    for o in yeni_ogeler:
+        kuyruk.pop(o["url"], None)
+
+    # ONEMLI: kuyruktaki ogeler farkli tarama turlerinden/zamanlardan
+    # gelebildigi icin id'leri carpisabilir (her Finviz kategorisi kendi
+    # ic sayaciyla ayristirir, ör. iki farkli tur da "0" verebilir). Gruba
+    # HEMEN once, tum sette KESIN benzersiz id'ler atanarak Gemini'nin
+    # sonucunun yanlis haberle eslesmesi onlenir.
     for _sira, o in enumerate(yeni_ogeler):
         o["id"] = str(_sira)
 
@@ -527,12 +604,17 @@ def _tara_calistir() -> dict:
         if hata:
             siniflandirma_hatalari.append(hata)
 
-    # Siniflandirilamayan ogeler depoya HIC YAZILMAZ (cevrilmemis/bos ozetli
-    # halde kalici olarak saklanmis olmasinlar diye); URL'leri depoda
-    # olmadigi icin bir sonraki taramada tekrar "yeni" sayilip yeniden
-    # siniflandirilmaya calisilirlar.
-    siniflandirilamayan_sayisi = sum(1 for o in yeni_ogeler if o.get("_siniflandirilamadi"))
-    yeni_ogeler = [o for o in yeni_ogeler if not o.get("_siniflandirilamadi")]
+    # Siniflandirilamayan ogeler depoya YAZILMAZ, kuyruga GERI konur; bir
+    # sonraki /api/haber-siniflandir cagrisinda tekrar denenir.
+    siniflandirilamayan_sayisi = 0
+    basarili_ogeler: list[dict] = []
+    for o in yeni_ogeler:
+        if o.pop("_siniflandirilamadi", False):
+            kuyruk[o["url"]] = o
+            siniflandirilamayan_sayisi += 1
+        else:
+            basarili_ogeler.append(o)
+    yeni_ogeler = basarili_ogeler
 
     # Farkli kaynaklarin ORIJINAL basliklari farkli olsa bile (ör. ayni
     # olayi degisik sekilde anlatan iki site), Gemini'nin TURKCE cevirisi
@@ -582,15 +664,11 @@ def _tara_calistir() -> dict:
             o["ilkGorulme"] = yaklasik.isoformat(timespec="milliseconds") if yaklasik else simdi
         depo[o["url"]] = o
 
-    silinen_urller = [url for url in depo.keys() if url not in guncel_url_seti]
-    for url in silinen_urller:
-        del depo[url]
-
-    # Her taramada otomatik bakim: gecmiste (ör. eski koddan kalma) olusmus
-    # mukerrer ya da cevrilmeden/ozetsiz kalmis kayitlari da temizler; boylece
-    # Ayarlar'daki bakim butonlarina elle basmaya normalde gerek kalmaz. Ayrica
-    # saat-cevirme ozelligi eklenmeden once kaydedilmis eski kayitlarin
-    # saatini de geriye donuk Turkce saate cevirir.
+    # Her siniflandirmada otomatik bakim: gecmiste (ör. eski koddan kalma)
+    # olusmus mukerrer ya da cevrilmeden/ozetsiz kalmis kayitlari da temizler;
+    # boylece Ayarlar'daki bakim butonlarina elle basmaya normalde gerek
+    # kalmaz. Ayrica saat-cevirme ozelligi eklenmeden once kaydedilmis eski
+    # kayitlarin saatini de geriye donuk Turkce saate cevirir.
     saat_donusturulen = _depodaki_eski_saatleri_turkce_saate_cevir(depo)
     tarih_duzeltilen = _depodaki_tarihleri_istanbul_gunune_gore_duzelt(depo)
     mukerrer_temizlenen = _depoyu_mukerrerlerden_ayikla(depo)
@@ -598,46 +676,92 @@ def _tara_calistir() -> dict:
 
     try:
         redis_store.depo_kaydet(depo)
-        redis_store.son_tarama_kaydet(simdi)
+        redis_store.bekleyen_siniflandirma_kaydet(kuyruk)
+        redis_store.son_siniflandirma_kaydet(simdi)
     except Exception as e:  # noqa: BLE001
         raise TaramaHatasi(str(e)) from e
 
     siniflandirma_hatalari.extend(_esik_takibi_ve_bildirim(yeni_ogeler, depo))
 
     try:
-        redis_store.son_hatalar_kaydet(tarama_hatalari + siniflandirma_hatalari)
+        onceki_hatalar = redis_store.son_hatalar_yukle()
+        if not isinstance(onceki_hatalar, dict):
+            onceki_hatalar = {}
+        onceki_hatalar["siniflandirma"] = siniflandirma_hatalari
+        redis_store.son_hatalar_kaydet(onceki_hatalar)
     except Exception:  # noqa: BLE001
-        pass  # tanilama amacli, taramayi basarisiz saymaya degmez
+        pass  # tanilama amacli, siniflandirmayi basarisiz saymaya degmez
 
     return {
         "ok": True,
-        "yeniSayisi": len(yeni_ogeler),
-        "islenmeyenYeniSayisi": isleme_alinmayan_sayisi,
+        "islenenSayisi": len(yeni_ogeler),
         "siniflandirilamayanSayisi": siniflandirilamayan_sayisi,
-        "silinenSayisi": len(silinen_urller),
+        "kuyruktaKalanSayisi": len(kuyruk),
         "mukerrerTemizlenenSayisi": mukerrer_temizlenen,
         "basarisizTemizlenenSayisi": basarisiz_temizlenen,
         "saatDonusturulenSayisi": saat_donusturulen,
         "tarihDuzeltilenSayisi": tarih_duzeltilen,
         "toplamDepo": len(depo),
-        "taramaHatalari": tarama_hatalari,
         "siniflandirmaHatalari": siniflandirma_hatalari,
     }
 
 
-@app.post("/api/tara")
-def tara(request: Request):
-    """Disaridan (cron-job.org gibi) periyodik cagrilir; POLL_SECRET ile korunur."""
+def _poll_secret_dogrula(request: Request) -> bool:
     beklenen_sir = os.environ.get("POLL_SECRET")
-    if beklenen_sir:
-        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
-        if gelen_sir != beklenen_sir:
-            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+    if not beklenen_sir:
+        return True
+    gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
+    return gelen_sir == beklenen_sir
+
+
+@app.post("/api/haber-cek")
+def haber_cek(request: Request):
+    """Disaridan (cron-job.org gibi) her 15 dakikada bir cagrilir; POLL_SECRET
+    ile korunur. Sadece Finviz'i tarar, Gemini'ye dokunmaz - hizli ve
+    zaman asimi riski neredeyse yok."""
+    if not _poll_secret_dogrula(request):
+        return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
 
     try:
-        return _tara_calistir()
+        return _haber_cek_calistir()
     except TaramaHatasi as e:
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=e.status_code)
+
+
+@app.post("/api/haber-siniflandir")
+def haber_siniflandir(request: Request):
+    """Disaridan (cron-job.org gibi) her 15 dakikada bir, /api/haber-cek'ten
+    BAGIMSIZ olarak cagrilir; POLL_SECRET ile korunur. Bekleme kuyrugundan
+    tek bir grubu Gemini ile siniflandirir."""
+    if not _poll_secret_dogrula(request):
+        return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+
+    try:
+        return _siniflandir_calistir()
+    except TaramaHatasi as e:
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=e.status_code)
+
+
+@app.post("/api/tara")
+def tara(request: Request):
+    """Geriye donuk uyumluluk/manuel test icin: /api/haber-cek ve
+    /api/haber-siniflandir'i sirayla cagiran kisayol. POLL_SECRET ile
+    korunur. Otomatik periyodik tetiklemede artik bu ikisini AYRI cron'lardan
+    cagirmak (biri yavaslasa bile digerini etkilemesin diye) tercih edilir."""
+    if not _poll_secret_dogrula(request):
+        return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+
+    try:
+        cek_sonuc = _haber_cek_calistir()
+        siniflandir_sonuc = _siniflandir_calistir()
+    except TaramaHatasi as e:
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=e.status_code)
+
+    return {
+        "ok": True,
+        "haberCek": cek_sonuc,
+        "siniflandirma": siniflandir_sonuc,
+    }
 
 
 _SAAT_TR_FORMAT_RE = re.compile(r"^\d{2}:\d{2}$")
@@ -754,6 +878,7 @@ def depo_sifirla():
     try:
         redis_store.depo_kaydet({})
         redis_store.sayaclari_kaydet({})
+        redis_store.bekleyen_siniflandirma_kaydet({})
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
     return {"ok": True}

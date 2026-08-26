@@ -28,16 +28,16 @@ def gemini_json_iste(prompt: str, response_schema: dict, api_key: str, model: st
 
     # 429 (istek limiti) ve 5xx (gecici sunucu yogunlugu/erisilemezligi, ör.
     # "high demand" 503) gecici sayilir ve tekrar denenir; digerleri kalicidir.
-    # /api/tara artik GitHub Actions uzerinden (cron-job.org'un sabit 30
-    # saniyelik siniri olmadan) tetiklendigi icin Gemini'ye daha fazla sure
-    # taniyabiliyoruz - 10 haberlik bir grubun cevrilip ozetlenmesi bazen
-    # gercekten 12 saniyeden uzun surebiliyor (zaman asimi degil, gercek
-    # uretim suresi).
+    # Siniflandirma artik cron-job.org'un sabit 30 saniyelik siniri icinde
+    # kalmasi gereken /api/haber-siniflandir uzerinden (tek seferde tek grup)
+    # tetikleniyor; bu yuzden timeout dar tutulur - en kotu ihtimalle
+    # (2 deneme + 1s bekleme) ~21 saniye, geri kalan pay redis/JSON islemleri
+    # icin birakilir.
     GECICI_HATA_KODLARI = {500, 502, 503, 504}
 
     for deneme in range(2):
         try:
-            resp = requests.post(url, params={"key": api_key}, json=body, timeout=20)
+            resp = requests.post(url, params={"key": api_key}, json=body, timeout=10)
         except Exception as e:  # noqa: BLE001
             son_hata = e
             time.sleep(1 * (deneme + 1))
