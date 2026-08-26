@@ -538,7 +538,24 @@ def _tara_calistir() -> dict:
 
     simdi = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
     for o in yeni_ogeler:
-        o["ilkGorulme"] = simdi
+        # Finviz zamanlari kendi sitesinde ABD Dogu saatiyle yazilir; scraper
+        # bunu zaten gercek bir UTC ana zamana cevirip "zamanUtc" olarak
+        # ekliyor. Elde varsa hem ilkGorulme'yi (sirlama/gunun ozeti icin)
+        # hem de kullaniciya gosterilen "saat"i Istanbul saatine gore bu
+        # degerden turetiyoruz; yoksa (ör. sadece tarih iceren eski kayit)
+        # tarama anini kullaniyoruz.
+        zaman_utc_str = o.get("zamanUtc")
+        zaman_utc = None
+        if zaman_utc_str:
+            try:
+                zaman_utc = datetime.fromisoformat(zaman_utc_str)
+            except ValueError:
+                zaman_utc = None
+        if zaman_utc:
+            o["ilkGorulme"] = zaman_utc.isoformat(timespec="milliseconds")
+            o["saat"] = zaman_utc.astimezone(ISTANBUL_TZ).strftime("%H:%M")
+        else:
+            o["ilkGorulme"] = simdi
         depo[o["url"]] = o
 
     silinen_urller = [url for url in depo.keys() if url not in guncel_url_seti]
@@ -858,7 +875,7 @@ def sentetik_haber_ekle(request: Request):
             "url": url,
             "kategori": "ana",
             "tarih": simdi.date().isoformat(),
-            "saat": simdi.strftime("%H:%M"),
+            "saat": simdi.astimezone(ISTANBUL_TZ).strftime("%H:%M"),
             "kaynak": "sentetik-test",
             "kaynakOzeti": "",
             "baslik": f"[TEST] {SINIF_ETIKET_TR.get(sinif, sinif)} sentetik haber {i + 1}",

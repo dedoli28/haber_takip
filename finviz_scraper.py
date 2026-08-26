@@ -19,8 +19,9 @@ from __future__ import annotations
 
 import concurrent.futures
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import requests
 from bs4 import BeautifulSoup
@@ -37,7 +38,12 @@ KATEGORI_V_PARAM = {
 }
 
 TIME_RE = re.compile(r"^\d{1,2}:\d{2}\s*(AM|PM)$", re.IGNORECASE)
-RELATIVE_RE = re.compile(r"^\d+\s*(min|mins|minute|minutes|hour|hours|hr|hrs)$", re.IGNORECASE)
+RELATIVE_RE = re.compile(r"^(\d+)\s*(min|mins|minute|minutes|hour|hours|hr|hrs)$", re.IGNORECASE)
+
+# Finviz zamanlari kendi sitesinde ABD Dogu saatiyle (New York) gosterilir;
+# "bugun" hesabi da bu saat dilimine gore yapilmali, yoksa UTC gece yarisi
+# civarinda Finviz'in gunuyle bir gun kayabilir.
+NY_TZ = ZoneInfo("America/New_York")
 
 _HEADERS = {
     "User-Agent": (
@@ -60,6 +66,31 @@ def _satir_tarihini_belirle(saat_metni: str, bugun: date) -> date:
         return bugun
 
 
+def _saat_metnini_utc_zamanina_cevir(saat_metni: str, tarih: date, simdi_utc: datetime) -> datetime | None:
+    """Finviz'in saat hucresindeki metni gercek bir UTC zaman damgasina
+    cevirir: mutlak saatler ('02:05PM') Finviz'in kendi saat dilimi olan
+    ABD Dogu saatine (America/New_York) gore yazilir; goreli sureler
+    ('19 min', '3 hours') tarama anindan geriye dogru hesaplanir. Sadece
+    tarih iceren eski kayitlarda (ör. 'Aug-19') saat bilgisi olmadigindan
+    None doner."""
+    if TIME_RE.match(saat_metni):
+        try:
+            saat_kismi = datetime.strptime(saat_metni.upper().replace(" ", ""), "%I:%M%p").time()
+        except ValueError:
+            return None
+        yerel = datetime.combine(tarih, saat_kismi, tzinfo=NY_TZ)
+        return yerel.astimezone(timezone.utc)
+
+    m = RELATIVE_RE.match(saat_metni)
+    if m:
+        sayi = int(m.group(1))
+        birim = m.group(2).lower()
+        delta = timedelta(minutes=sayi) if birim.startswith("min") else timedelta(hours=sayi)
+        return simdi_utc - delta
+
+    return None
+
+
 def _sayfayi_getir(v_param: str | None) -> BeautifulSoup:
     url = FINVIZ_URL if not v_param else f"{FINVIZ_URL}?v={v_param}"
     resp = requests.get(url, headers=_HEADERS, timeout=20)
@@ -68,7 +99,8 @@ def _sayfayi_getir(v_param: str | None) -> BeautifulSoup:
 
 
 def _tabloyu_ayristir(tablo) -> list[dict]:
-    bugun = datetime.now().date()
+    simdi_utc = datetime.now(timezone.utc)
+    bugun = simdi_utc.astimezone(NY_TZ).date()
     haberler: list[dict] = []
     gorulen_url: set[str] = set()
     sayac = 0
@@ -81,6 +113,7 @@ def _tabloyu_ayristir(tablo) -> list[dict]:
 
         saat_metni = saat_hucre.get_text(strip=True)
         tarih = _satir_tarihini_belirle(saat_metni, bugun)
+        zaman_utc = _saat_metnini_utc_zamanina_cevir(saat_metni, tarih, simdi_utc)
 
         url = link.get("href", "").strip()
         baslik = link.get_text(strip=True)
@@ -101,6 +134,7 @@ def _tabloyu_ayristir(tablo) -> list[dict]:
                 "id": str(sayac),
                 "saat": saat_metni,
                 "tarih": tarih.isoformat(),
+                "zamanUtc": zaman_utc.isoformat(timespec="milliseconds") if zaman_utc else None,
                 "baslik": baslik,
                 "url": url,
                 "kaynak": kaynak,
@@ -113,7 +147,8 @@ def _tabloyu_ayristir(tablo) -> list[dict]:
 
 
 def _pazar_nabzi_ayristir(tablo) -> list[dict]:
-    bugun = datetime.now().date()
+    simdi_utc = datetime.now(timezone.utc)
+    bugun = simdi_utc.astimezone(NY_TZ).date()
     haberler: list[dict] = []
     gorulen: set[str] = set()
     sayac = 0
@@ -126,6 +161,7 @@ def _pazar_nabzi_ayristir(tablo) -> list[dict]:
 
         saat_metni = saat_hucre.get_text(strip=True)
         tarih = _satir_tarihini_belirle(saat_metni, bugun)
+        zaman_utc = _saat_metnini_utc_zamanina_cevir(saat_metni, tarih, simdi_utc)
         baslik = baslik_el.get_text(strip=True)
 
         anahtar = f"{saat_metni}|{baslik}"
@@ -160,6 +196,7 @@ def _pazar_nabzi_ayristir(tablo) -> list[dict]:
                 "id": str(sayac),
                 "saat": saat_metni,
                 "tarih": tarih.isoformat(),
+                "zamanUtc": zaman_utc.isoformat(timespec="milliseconds") if zaman_utc else None,
                 "baslik": baslik,
                 "url": url or "https://finviz.com/news?v=6",
                 "kaynak": "finviz.com",
