@@ -1,0 +1,17 @@
+name: Sabah Ozeti
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sabah:
+    runs-on: ubuntu-latest
+    steps:
+      - name: /api/sabah-ozeti tetikle
+        run: |
+          curl -sS -X POST "https://haber-takip-nper.vercel.app/api/sabah-ozeti" \
+            -H "x-poll-secret: ${{ secrets.POLL_SECRET }}" \
+            --max-time 55 \
+            --fail-with-body
