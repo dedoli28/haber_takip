@@ -31,7 +31,8 @@ Statik arayuz (static_ui/) ayni uygulama uzerinden servis edilir.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+import re
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
@@ -41,7 +42,7 @@ from fastapi.staticfiles import StaticFiles
 
 import email_client
 import redis_store
-from finviz_scraper import tum_turleri_cek
+from finviz_scraper import _saat_metnini_utc_zamanina_cevir, tum_turleri_cek
 from gemini_client import (
     KATEGORI_ETIKET,
     analiz_prompt_olustur,
@@ -564,7 +565,10 @@ def _tara_calistir() -> dict:
 
     # Her taramada otomatik bakim: gecmiste (ör. eski koddan kalma) olusmus
     # mukerrer ya da cevrilmeden/ozetsiz kalmis kayitlari da temizler; boylece
-    # Ayarlar'daki bakim butonlarina elle basmaya normalde gerek kalmaz.
+    # Ayarlar'daki bakim butonlarina elle basmaya normalde gerek kalmaz. Ayrica
+    # saat-cevirme ozelligi eklenmeden once kaydedilmis eski kayitlarin
+    # saatini de geriye donuk Turkce saate cevirir.
+    saat_donusturulen = _depodaki_eski_saatleri_turkce_saate_cevir(depo)
     mukerrer_temizlenen = _depoyu_mukerrerlerden_ayikla(depo)
     basarisiz_temizlenen = _depodan_basarisiz_siniflandirmalari_ayikla(depo)
 
@@ -589,6 +593,7 @@ def _tara_calistir() -> dict:
         "silinenSayisi": len(silinen_urller),
         "mukerrerTemizlenenSayisi": mukerrer_temizlenen,
         "basarisizTemizlenenSayisi": basarisiz_temizlenen,
+        "saatDonusturulenSayisi": saat_donusturulen,
         "toplamDepo": len(depo),
         "taramaHatalari": tarama_hatalari,
         "siniflandirmaHatalari": siniflandirma_hatalari,
@@ -608,6 +613,41 @@ def tara(request: Request):
         return _tara_calistir()
     except TaramaHatasi as e:
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=e.status_code)
+
+
+_SAAT_TR_FORMAT_RE = re.compile(r"^\d{2}:\d{2}$")
+
+
+def _depodaki_eski_saatleri_turkce_saate_cevir(depo: dict) -> int:
+    """Saat-cevirme ozelligi eklenmeden once depoya girmis kayitlarin 'saat'
+    alani hala Finviz'in ham metni olabilir (ör. '02:05PM', '19 min'). Bu
+    kayitlar icin, o haberin ilk gorulme anini (ilkGorulme) referans alarak
+    ayni cevrimi geriye donuk uygular; boylece kullanicinin depoyu sifirlamasina
+    gerek kalmadan mevcut haberler de duzelir. Zaten cevrilmis ('HH:MM')
+    kayitlar atlanir."""
+    donusturulen = 0
+    for o in depo.values():
+        saat_metni = o.get("saat") or ""
+        if _SAAT_TR_FORMAT_RE.match(saat_metni):
+            continue
+        tarih_str = o.get("tarih")
+        if not tarih_str:
+            continue
+        try:
+            tarih = date.fromisoformat(tarih_str)
+        except ValueError:
+            continue
+        try:
+            referans_simdi = datetime.fromisoformat(o.get("ilkGorulme", ""))
+        except ValueError:
+            referans_simdi = datetime.now(timezone.utc)
+        zaman_utc = _saat_metnini_utc_zamanina_cevir(saat_metni, tarih, referans_simdi)
+        if not zaman_utc:
+            continue
+        o["saat"] = zaman_utc.astimezone(ISTANBUL_TZ).strftime("%H:%M")
+        o["ilkGorulme"] = zaman_utc.isoformat(timespec="milliseconds")
+        donusturulen += 1
+    return donusturulen
 
 
 def _depoyu_mukerrerlerden_ayikla(depo: dict) -> int:
