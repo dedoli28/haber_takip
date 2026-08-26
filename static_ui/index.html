@@ -78,8 +78,27 @@
                 <button class="chip" data-sinif="onemsiz" style="--chip-c:#6b7280">Önemsiz</button>
               </div>
             </div>
+            <div class="filter-popover-section">
+              <div class="filter-popover-title">Saat Aralığı</div>
+              <div class="saat-araligi-row">
+                <select id="haberSaatBaslangic">
+                  <option value="">Başlangıç</option>
+                </select>
+                <span class="saat-araligi-ayrac">—</span>
+                <select id="haberSaatBitis">
+                  <option value="">Bitiş</option>
+                </select>
+              </div>
+            </div>
             <button class="btn btn-ghost btn-sm filter-popover-clear" id="haberFiltreTemizleBtn">Filtreleri Temizle</button>
           </div>
+        </div>
+
+        <div class="field">
+          <select id="haberSiralama">
+            <option value="onem_yeni">Öneme göre (Yeni → Eski)</option>
+            <option value="onem_eski">Öneme göre (Eski → Yeni)</option>
+          </select>
         </div>
 
         <div class="field-spacer"></div>
@@ -170,7 +189,7 @@
 
     <div class="modal-section">
       <div class="modal-section-title">Bildirim E-postaları</div>
-      <p class="modal-hint">Her e-posta adresi, önemli haber biriktiğinde bildirim almak için varsayılan eşiği kullanır — isterseniz kendi özel eşik sayılarını da tanımlayabilir.</p>
+      <p class="modal-hint">10 Çok Önemli, 25 Önemli ya da 50 Bakmaya Değer yeni haber biriktiğinde bu adreslere e-posta gönderilir (gece 00:00-06:00 arası gönderilmez, biriken haberler sabah 06:00'da toplu gelir; aynı adrese en fazla 90 dakikada bir mail gider).</p>
 
       <div class="key-row">
         <input type="text" id="epostaInput" placeholder="ornek@eposta.com">

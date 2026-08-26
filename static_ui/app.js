@@ -19,6 +19,7 @@ const KATEGORI_ETIKET = {
   blog: "Blog",
 };
 const KATEGORI_SIRA = ["ana", "hisse", "etf", "kripto", "pazar_nabzi", "blog"];
+const SINIF_ONEM_SIRA = { cok_onemli: 0, onemli: 1, bakmaya_deger: 2, onemsiz: 3 };
 
 /* ===================== Helpers ===================== */
 function $(id) { return document.getElementById(id); }
@@ -176,67 +177,7 @@ function filtreRozetGuncelle(rozetId, sayac) {
 }
 
 /* ===================== Ayarlar modal (bildirim e-postaları) ===================== */
-/* ===================== Bildirim e-postaları + esikler ===================== */
-const SINIF_ESIK_SIRA = [
-  ["cok_onemli", "Çok Önemli"],
-  ["onemli", "Önemli"],
-  ["bakmaya_deger", "Bakmaya Değer"],
-];
-const VARSAYILAN_ORTAK_ESIK = {
-  cok_onemli: { aktif: true, esik: 15 },
-  onemli: { aktif: true, esik: 60 },
-  bakmaya_deger: { aktif: true, esik: 180 },
-};
-let mevcutAyarlar = { ortak_esik: JSON.parse(JSON.stringify(VARSAYILAN_ORTAK_ESIK)), alicilar: [] };
-
-function esikGirdileriniOku(kapsam) {
-  const esik = {};
-  kapsam.querySelectorAll("input[data-sinif]").forEach((inp) => {
-    const sinif = inp.dataset.sinif;
-    const aktifCB = kapsam.querySelector(`input[data-sinif-aktif="${sinif}"]`);
-    esik[sinif] = { aktif: aktifCB ? aktifCB.checked : true, esik: Math.max(1, parseInt(inp.value, 10) || 1) };
-  });
-  return esik;
-}
-
-function esikInputSatiriOlustur(deger) {
-  const satir = document.createElement("div");
-  satir.className = "esik-input-row";
-  SINIF_ESIK_SIRA.forEach(([sinif, etiket]) => {
-    const alan = document.createElement("div");
-    alan.className = "esik-input-field";
-
-    const lbl = document.createElement("label");
-    lbl.className = "esik-aktif-toggle";
-
-    const miniSwitch = document.createElement("span");
-    miniSwitch.className = "mini-switch";
-    const aktifCB = document.createElement("input");
-    aktifCB.type = "checkbox";
-    aktifCB.checked = deger[sinif].aktif !== false;
-    aktifCB.dataset.sinifAktif = sinif;
-    const slider = document.createElement("span");
-    slider.className = "slider";
-    miniSwitch.appendChild(aktifCB);
-    miniSwitch.appendChild(slider);
-    lbl.appendChild(miniSwitch);
-
-    lbl.appendChild(document.createTextNode(" " + etiket));
-    alan.appendChild(lbl);
-
-    const inp = document.createElement("input");
-    inp.type = "number";
-    inp.min = "1";
-    inp.value = deger[sinif].esik;
-    inp.dataset.sinif = sinif;
-    inp.disabled = !aktifCB.checked;
-    aktifCB.addEventListener("change", () => { inp.disabled = !aktifCB.checked; });
-    alan.appendChild(inp);
-
-    satir.appendChild(alan);
-  });
-  return satir;
-}
+let mevcutAyarlar = { alicilar: [] };
 
 function aliciListesiCiz() {
   const kutu = $("epostaListesi");
@@ -274,21 +215,6 @@ function aliciListesiCiz() {
     bas.appendChild(silBtn);
 
     satir.appendChild(bas);
-
-    const girdiSatiri = esikInputSatiriOlustur(alici.esik || mevcutAyarlar.ortak_esik);
-    girdiSatiri.style.marginTop = "10px";
-    satir.appendChild(girdiSatiri);
-
-    const kaydetBtn = document.createElement("button");
-    kaydetBtn.className = "btn btn-outline btn-sm";
-    kaydetBtn.style.marginTop = "8px";
-    kaydetBtn.textContent = "Kaydet";
-    kaydetBtn.addEventListener("click", () => {
-      mevcutAyarlar.alicilar[index].esik = esikGirdileriniOku(girdiSatiri);
-      ayarlariKaydet("Eşik güncellendi.");
-    });
-    satir.appendChild(kaydetBtn);
-
     kutu.appendChild(satir);
   });
 }
@@ -299,10 +225,7 @@ async function ayarlarYukle() {
     const yanit = await resp.json();
     if (!yanit.ok) { toast(yanit.hata || "Ayarlar alınamadı.", "error"); return; }
 
-    mevcutAyarlar = {
-      ortak_esik: yanit.ayarlar.ortak_esik || JSON.parse(JSON.stringify(VARSAYILAN_ORTAK_ESIK)),
-      alicilar: yanit.ayarlar.alicilar || [],
-    };
+    mevcutAyarlar = { alicilar: yanit.ayarlar.alicilar || [] };
 
     aliciListesiCiz();
   } catch (e) {
@@ -351,7 +274,7 @@ function ayarlarBaslat() {
     if (!epostaGecerliMi(deger)) { toast("Geçerli bir e-posta adresi gir.", "warn"); return; }
     if (mevcutAyarlar.alicilar.some((a) => a.eposta === deger)) { toast("Bu e-posta zaten ekli.", "warn"); return; }
 
-    mevcutAyarlar.alicilar.push({ eposta: deger, esik: null });
+    mevcutAyarlar.alicilar.push({ eposta: deger });
     ayarlariKaydet("E-posta eklendi.");
     input.value = "";
   }
@@ -624,6 +547,20 @@ function bosDurumCiz(konteynerId, mesaj) {
 }
 
 /* ===================== Haberler paneli (filtreleme + manuel tarama) ===================== */
+function saatSecimKutulariniDoldur() {
+  [$("haberSaatBaslangic"), $("haberSaatBitis")].forEach((sel) => {
+    if (!sel || sel.dataset.dolduruldu) return;
+    for (let s = 0; s < 24; s++) {
+      const deger = String(s).padStart(2, "0");
+      const opt = document.createElement("option");
+      opt.value = deger;
+      opt.textContent = deger + ":00";
+      sel.appendChild(opt);
+    }
+    sel.dataset.dolduruldu = "1";
+  });
+}
+
 function haberPaneliOlustur() {
   const state = { tumOgeler: [], arama: "" };
 
@@ -639,15 +576,27 @@ function haberPaneliOlustur() {
 
   filtrePopoverBaslat("haberFiltreBtn", "haberFiltrePopover");
 
+  saatSecimKutulariniDoldur();
+  const saatBaslangic = $("haberSaatBaslangic");
+  const saatBitis = $("haberSaatBitis");
+  const siralama = $("haberSiralama");
+
   function rozetGuncelle() {
-    const sayac = (tarih.durum.deger ? 1 : 0) + kategori.secili.size + sinif.secili.size;
+    const saatSeciliMi = saatBaslangic.value !== "" || saatBitis.value !== "";
+    const sayac = (tarih.durum.deger ? 1 : 0) + kategori.secili.size + sinif.secili.size + (saatSeciliMi ? 1 : 0);
     filtreRozetGuncelle("haberFiltreRozet", sayac);
   }
+
+  saatBaslangic.addEventListener("change", () => { rozetGuncelle(); ciz(); });
+  saatBitis.addEventListener("change", () => { rozetGuncelle(); ciz(); });
+  if (siralama) siralama.addEventListener("change", ciz);
 
   $("haberFiltreTemizleBtn").addEventListener("click", () => {
     tarih.temizle();
     kategori.temizle();
     sinif.temizle();
+    saatBaslangic.value = "";
+    saatBitis.value = "";
     rozetGuncelle();
     ciz();
   });
@@ -660,6 +609,15 @@ function haberPaneliOlustur() {
     if (kategori.secili.size > 0) gorulen = gorulen.filter((h) => kategori.secili.has(h.kategori));
     if (tarih.durum.deger === "bugun") gorulen = gorulen.filter((h) => h.tarih === bugununTarihi());
     if (tarih.durum.deger === "dun") gorulen = gorulen.filter((h) => h.tarih === dununTarihi());
+    if (saatBaslangic.value !== "" || saatBitis.value !== "") {
+      const bas = saatBaslangic.value !== "" ? parseInt(saatBaslangic.value, 10) : 0;
+      const bit = saatBitis.value !== "" ? parseInt(saatBitis.value, 10) : 23;
+      gorulen = gorulen.filter((h) => {
+        if (!h.ilkGorulme) return false;
+        const saat = new Date(h.ilkGorulme).getHours();
+        return bas <= bit ? (saat >= bas && saat <= bit) : (saat >= bas || saat <= bit);
+      });
+    }
     if (state.arama) {
       const q = state.arama.toLowerCase();
       gorulen = gorulen.filter(
@@ -669,6 +627,17 @@ function haberPaneliOlustur() {
           (h.ai_ozet || "").toLowerCase().includes(q)
       );
     }
+
+    const yon = siralama ? siralama.value : "onem_yeni";
+    gorulen = gorulen.slice().sort((a, b) => {
+      const oa = SINIF_ONEM_SIRA[a.sinif] ?? 99;
+      const ob = SINIF_ONEM_SIRA[b.sinif] ?? 99;
+      if (oa !== ob) return oa - ob;
+      const ta = a.ilkGorulme ? new Date(a.ilkGorulme).getTime() : 0;
+      const tb = b.ilkGorulme ? new Date(b.ilkGorulme).getTime() : 0;
+      return yon === "onem_eski" ? ta - tb : tb - ta;
+    });
+
     return gorulen;
   }
 

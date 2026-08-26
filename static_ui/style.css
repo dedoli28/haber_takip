@@ -242,6 +242,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 }
 .filter-popover-hint { text-transform: none; font-weight: 500; letter-spacing: 0; color: var(--text-faint); }
 .filter-popover-clear { width: 100%; justify-content: center; margin-top: 14px; }
+.saat-araligi-row { display: flex; align-items: center; gap: 8px; }
+.saat-araligi-row select { min-width: 0; flex: 1; }
+.saat-araligi-ayrac { color: var(--text-faint); font-size: 12px; flex-shrink: 0; }
 
 /* ===================== Cards ===================== */
 .card-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding-bottom: 20px; align-items: start; }
@@ -330,37 +333,11 @@ html[data-theme="light"] .skeleton-card::after {
 .modal-wide { width: 640px; }
 .account-chip-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
-.esik-input-row { display: flex; gap: 10px; flex-wrap: wrap; }
-.esik-input-field { display: flex; flex-direction: column; gap: 5px; flex: 1 1 100px; min-width: 90px; }
-.esik-input-field label { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; color: var(--text-faint); text-transform: uppercase; }
-.esik-input-field input { width: 100%; }
-.esik-input-field input[type="number"]:disabled { opacity: .4; cursor: not-allowed; }
-.esik-aktif-toggle { display: flex !important; flex-direction: row !important; align-items: center; gap: 7px; cursor: pointer; text-transform: none !important; }
-
-/* Mini toggle switch (uiverse.io/alexruix/silent-otter-72 temasina gore uyarlandi, MIT) */
-.mini-switch { position: relative; display: inline-block; width: 30px; height: 17px; flex-shrink: 0; }
-.mini-switch input { position: absolute; opacity: 0; width: 0; height: 0; margin: 0; }
-.mini-switch .slider {
-  position: absolute; inset: 0; cursor: pointer;
-  background: var(--border); border: 1px solid var(--border);
-  border-radius: 999px; transition: background-color .2s ease, border-color .2s ease;
-}
-.mini-switch .slider::before {
-  content: ""; position: absolute; left: 1px; top: 1px;
-  width: 13px; height: 13px; border-radius: 50%;
-  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.35);
-  transition: transform .2s cubic-bezier(.4,0,.2,1);
-}
-.mini-switch input:checked + .slider { background: var(--accent); border-color: var(--accent); }
-.mini-switch input:checked + .slider::before { transform: translateX(13px); }
-.mini-switch input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 2px; }
-
 .alici-esik-satir { background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: var(--radius-md); padding: 10px 12px; }
 .alici-esik-bas { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .alici-esik-adres { font-size: 13px; font-weight: 700; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .alici-sil-btn { cursor: pointer; color: var(--text-faint); font-size: 13px; padding: 2px 4px; }
 .alici-sil-btn:hover { color: var(--danger); }
-.alici-esik-satir .esik-input-row { margin-top: 10px; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .modal-head h3 { margin: 0; font-size: 16.5px; }
 .modal-section { padding: 14px 0 4px; }
@@ -449,9 +426,6 @@ html[data-theme="light"] .skeleton-card::after {
     border-radius: 0; padding: 16px 16px 20px; }
   .modal-overlay { padding: 0; }
   .modal-overlay.is-open { align-items: stretch; justify-content: stretch; }
-
-  .esik-input-row { flex-direction: column; }
-  .esik-input-field { min-width: 0; }
 
   .item-card { padding: 10px 12px; gap: 10px; }
   .item-title { font-size: 13.5px; }
