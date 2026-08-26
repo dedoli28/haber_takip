@@ -276,13 +276,31 @@ def _siniflandir_grup(grup: list[dict], api_key: str) -> str | None:
 EPOSTA_SINIF_BASINA_AZAMI = 20
 
 
+def _urlleri_baslik_bazinda_tekillestir(urller: list[str], depo: dict) -> list[str]:
+    """Ayni baslikli haber (farkli URL'lerle bekleyen listesine birden fazla
+    kez girmis olsa bile) e-postada yalnizca bir kez gorunsun diye, verilen
+    URL listesini basliga gore tekillestirir (ilk gorulen URL korunur)."""
+    gorulen_baslik: set[str] = set()
+    tekil: list[str] = []
+    for url in urller:
+        o = depo.get(url)
+        baslik_norm = ((o.get("baslikTr") or o.get("baslik")) if o else "").strip().lower()
+        if baslik_norm and baslik_norm in gorulen_baslik:
+            continue
+        if baslik_norm:
+            gorulen_baslik.add(baslik_norm)
+        tekil.append(url)
+    return tekil
+
+
 def _esik_email_html(tetiklenen: dict[str, list[str]], depo: dict) -> str:
     """E-posta govdesini olusturur. Bekleyen liste cok uzunsa (ör. gecmis bir
     gonderim hatasi yuzunden birikmisse) e-postanin devasa buyup zaman
     asimina/gonderim hatasina yol acmamasi icin sinif basina yalnizca en son
     EPOSTA_SINIF_BASINA_AZAMI haber gosterilir, kalani ozetlenir."""
     parcalar = ["<h2>Haber Takip Platformu</h2><p>Aşağıdaki önem eşikleri aşıldı:</p>"]
-    for sinif, urller in tetiklenen.items():
+    for sinif, ham_urller in tetiklenen.items():
+        urller = _urlleri_baslik_bazinda_tekillestir(ham_urller, depo)
         gosterilen = urller[-EPOSTA_SINIF_BASINA_AZAMI:]
         gizli_sayisi = len(urller) - len(gosterilen)
 
@@ -321,7 +339,7 @@ def _gun_sonu_email_html(gun_ozeti: dict, bekleyen: dict, depo: dict) -> str:
             "ama gün bittiği için burada topluca gönderiliyor:</p>"
         )
         for s in SINIF_ESIK_LISTESI:
-            urller = bekleyen.get(s, [])
+            urller = _urlleri_baslik_bazinda_tekillestir(bekleyen.get(s, []), depo)
             if not urller:
                 continue
             gosterilen = urller[-EPOSTA_SINIF_BASINA_AZAMI:]
