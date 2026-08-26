@@ -167,7 +167,7 @@ def durum():
         "epostaYapilandirilmisMi": email_client.yapilandirilmis_mi(),
         "sonTarama": redis_store.son_tarama_yukle(),
         "sonHatalar": redis_store.son_hatalar_yukle(),
-        "istanbulSaati": _istanbul_saati().isoformat(),
+        "istanbulSaati": _istanbul_saati().isoformat(timespec="milliseconds"),
     }
 
 
@@ -428,7 +428,7 @@ def _esik_takibi_ve_bildirim(yeni_ogeler: list[dict], depo: dict) -> list[str]:
                     email_client.eposta_gonder([eposta], "Haber Takip Platformu - Yeni Önemli Haberler", html)
                     for s in tetiklenen:
                         bekleyen[s] = []
-                    son_gonderim[eposta] = simdi_istanbul.isoformat()
+                    son_gonderim[eposta] = simdi_istanbul.isoformat(timespec="milliseconds")
                 except Exception as e:  # noqa: BLE001
                     hatalar.append(f"{eposta}: e-posta gönderilemedi: {e}")
 
@@ -536,7 +536,7 @@ def _tara_calistir() -> dict:
         nihai_yeni_ogeler.append(o)
     yeni_ogeler = nihai_yeni_ogeler
 
-    simdi = datetime.now(timezone.utc).isoformat()
+    simdi = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
     for o in yeni_ogeler:
         o["ilkGorulme"] = simdi
         depo[o["url"]] = o
@@ -785,7 +785,7 @@ def sabah_ozeti(request: Request):
         hatalar.append("GMAIL_ADDRESS / GMAIL_APP_PASSWORD tanımlı değil, e-posta gönderilemedi.")
     else:
         son_gonderim = redis_store.son_gonderim_yukle()
-        simdi_iso = _istanbul_saati().isoformat()
+        simdi_iso = _istanbul_saati().isoformat(timespec="milliseconds")
         for alici in aliciler:
             eposta = alici["eposta"]
             bekleyen = bekleyenler_tum.get(eposta, {})
@@ -865,7 +865,7 @@ def sentetik_haber_ekle(request: Request):
             "baslikTr": f"[TEST] {SINIF_ETIKET_TR.get(sinif, sinif)} sentetik haber {i + 1}",
             "sinif": sinif,
             "ai_ozet": "Bu, eşik/e-posta mekanizmasını test etmek için oluşturulmuş sahte bir haberdir.",
-            "ilkGorulme": simdi.isoformat(),
+            "ilkGorulme": simdi.isoformat(timespec="milliseconds"),
         }
         depo[url] = oge
         yeni_ogeler.append(oge)
