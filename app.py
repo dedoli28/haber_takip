@@ -536,6 +536,11 @@ def gun_sonu(request: Request):
     except Exception as e:  # noqa: BLE001
         hatalar.append(str(e))
 
+    try:
+        redis_store.son_hatalar_kaydet(hatalar)
+    except Exception:  # noqa: BLE001
+        pass  # tanilama amacli, istegi basarisiz saymaya degmez
+
     return {"ok": True, "gonderilenSayisi": gonderilen, "hatalar": hatalar}
 
 
