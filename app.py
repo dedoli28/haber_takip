@@ -459,6 +459,16 @@ def _tara_calistir() -> dict:
     yeni_ogeler = _kategoriler_arasi_adil_sec(tum_yeni_ogeler, MAX_YENI_HABER_BASINA_TARAMA)
     isleme_alinmayan_sayisi = len(tum_yeni_ogeler) - len(yeni_ogeler)
 
+    # ONEMLI: her Finviz kategorisi kendi haberlerini 0'dan baslayan kendi
+    # id numaralariyla ayristirir (ör. Piyasa'daki 1. haber id="0", Hisse'deki
+    # 1. haber de id="0"). Farkli kategorilerden gelen haberler ayni
+    # siniflandirma grubunda bulusunca, Gemini'nin sonucu YANLIS haberle
+    # eslesiyordu (ör. bir haberin Turkce basligi baska, alakasiz bir haberin
+    # ozeti oluyordu). Gruplamadan HEMEN once, tum sette KESIN benzersiz
+    # id'ler atanarak bu carpraz eslesme onlenir.
+    for _sira, o in enumerate(yeni_ogeler):
+        o["id"] = str(_sira)
+
     siniflandirma_hatalari: list[str] = []
     for i in range(0, len(yeni_ogeler), TARA_GRUP_BOYUTU):
         grup = yeni_ogeler[i : i + TARA_GRUP_BOYUTU]
@@ -579,6 +589,24 @@ def _depodan_basarisiz_siniflandirmalari_ayikla(depo: dict) -> int:
     for url in silinecek_urller:
         del depo[url]
     return len(silinecek_urller)
+
+
+@app.post("/api/depo-sifirla")
+def depo_sifirla():
+    """TUM haber deposunu sifirlar (butun haberleri kalici olarak siler).
+    Kok nedeni duzeltilen bir hata (id carpismasi) yuzunden gecmiste bazi
+    haberlerin Turkce basligi/ozeti BASKA, alakasiz bir habere ait olmus
+    olabilir; hangi kayitlarin bozuk oldugunu guvenilir sekilde ayirt etmenin
+    yolu olmadigindan en temiz cozum sifirdan baslamaktir. Sonraki taramalar
+    haberleri normal sekilde yeniden cekip (artik duzeltilmis id mantigiyla)
+    dogru siniflandirir. Bildirim ayarlari/e-posta listesi ETKILENMEZ,
+    yalnizca haber deposu sifirlanir. Geri alinamaz, bilerek kullanin."""
+    try:
+        redis_store.depo_kaydet({})
+        redis_store.sayaclari_kaydet({})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+    return {"ok": True}
 
 
 @app.post("/api/depo-tekillestir")
