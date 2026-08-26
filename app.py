@@ -248,16 +248,18 @@ def gun_ozeti():
 
 
 def _siniflandir_grup(grup: list[dict], api_key: str) -> str | None:
+    """Basarisiz olan ogeleri sahte/bozuk bir siniflandirmayla (cevrilmemis
+    baslik, bos ozet) kalici olarak isaretlemek YERINE '_siniflandirilamadi'
+    ile bayraklar; bu ogeler _tara_calistir tarafindan depoya HIC YAZILMAZ,
+    boylece bir sonraki taramada tekrar 'yeni' sayilip yeniden denenirler."""
     prompt = siniflandirma_prompt_olustur(grup)
     schema = siniflandirma_schema_olustur()
     try:
         sonuc = gemini_json_iste(prompt, schema, api_key, GEMINI_MODEL)
     except Exception as e:  # noqa: BLE001
         for o in grup:
-            o["sinif"] = "bakmaya_deger"
-            o["baslikTr"] = o["baslik"]
-            o["ai_ozet"] = ""
-        return f"{len(grup)} haberlik grup sınıflandırılamadı: {e}"
+            o["_siniflandirilamadi"] = True
+        return f"{len(grup)} haberlik grup sınıflandırılamadı, sonraki taramada tekrar denenecek: {e}"
 
     sonuc_map = {r["id"]: r for r in sonuc.get("results", [])}
     for o in grup:
@@ -267,9 +269,7 @@ def _siniflandir_grup(grup: list[dict], api_key: str) -> str | None:
             o["baslikTr"] = r.get("baslik_tr") or o["baslik"]
             o["ai_ozet"] = r.get("ozet", "")
         else:
-            o["sinif"] = "bakmaya_deger"
-            o["baslikTr"] = o["baslik"]
-            o["ai_ozet"] = ""
+            o["_siniflandirilamadi"] = True
     return None
 
 
@@ -466,6 +466,13 @@ def _tara_calistir() -> dict:
         if hata:
             siniflandirma_hatalari.append(hata)
 
+    # Siniflandirilamayan ogeler depoya HIC YAZILMAZ (cevrilmemis/bos ozetli
+    # halde kalici olarak saklanmis olmasinlar diye); URL'leri depoda
+    # olmadigi icin bir sonraki taramada tekrar "yeni" sayilip yeniden
+    # siniflandirilmaya calisilirlar.
+    siniflandirilamayan_sayisi = sum(1 for o in yeni_ogeler if o.get("_siniflandirilamadi"))
+    yeni_ogeler = [o for o in yeni_ogeler if not o.get("_siniflandirilamadi")]
+
     # Farkli kaynaklarin ORIJINAL basliklari farkli olsa bile (ör. ayni
     # olayi degisik sekilde anlatan iki site), Gemini'nin TURKCE cevirisi
     # ayni/cok benzer metne yakinsayabiliyor (ozellikle Pazar Nabzi'nin
@@ -510,6 +517,7 @@ def _tara_calistir() -> dict:
         "ok": True,
         "yeniSayisi": len(yeni_ogeler),
         "islenmeyenYeniSayisi": isleme_alinmayan_sayisi,
+        "siniflandirilamayanSayisi": siniflandirilamayan_sayisi,
         "silinenSayisi": len(silinen_urller),
         "toplamDepo": len(depo),
         "taramaHatalari": tarama_hatalari,
@@ -560,6 +568,41 @@ def depo_tekillestir(request: Request):
         if b:
             gorulen_baslik.add(b)
 
+    for url in silinecek_urller:
+        del depo[url]
+
+    try:
+        redis_store.depo_kaydet(depo)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    return {"ok": True, "silinenSayisi": len(silinecek_urller), "kalanSayisi": len(depo)}
+
+
+@app.post("/api/basarisiz-siniflandirmalari-temizle")
+def basarisiz_siniflandirmalari_temizle(request: Request):
+    """Yeni 'siniflandirilamayanlari depoya yazma' mantigi devreye girmeden
+    ONCE depoya girmis, hala cevrilmemis/ozetsiz kalmis (baslikTr==baslik ve
+    ai_ozet bos) haberleri depodan siler; boylece bir sonraki taramada
+    tekrar 'yeni' sayilip düzgün siniflandirilmaya calisilirlar. /api/tara
+    ile ayni POLL_SECRET korumasini kullanir. Sadece bir kereye mahsus,
+    gecmisi temizlemek icindir."""
+    beklenen_sir = os.environ.get("POLL_SECRET")
+    if beklenen_sir:
+        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
+        if gelen_sir != beklenen_sir:
+            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+
+    try:
+        depo = redis_store.depo_yukle()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    silinecek_urller = [
+        url
+        for url, o in depo.items()
+        if not (o.get("ai_ozet") or "").strip() and (o.get("baslikTr") or "") == (o.get("baslik") or "")
+    ]
     for url in silinecek_urller:
         del depo[url]
 
