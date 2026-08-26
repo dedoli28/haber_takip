@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time as dtime, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
@@ -99,6 +99,21 @@ def _gemini_anahtari() -> str:
 
 def _istanbul_saati() -> datetime:
     return datetime.now(ISTANBUL_TZ)
+
+
+def _tarihe_gore_yaklasik_zaman(tarih_str: str | None) -> datetime | None:
+    """Finviz'in sadece tarih verdigi (saat vermedigi, ör. 'Aug-23') eski
+    haberleri icin, o gunun ortasini (12:00, Istanbul) yaklasik bir zaman
+    olarak kullanir. Bu deger olmadan bu haberler 'ilkGorulme'yi tarama anina
+    (simdi) esitlemek zorunda kalir, bu da gunler onceki bir haberi az once
+    kesfedilmis gibi gosterip siralamayi (Yeniden Eskiye/Eskiye Yeni) bozar."""
+    if not tarih_str:
+        return None
+    try:
+        gun = date.fromisoformat(tarih_str)
+    except ValueError:
+        return None
+    return datetime.combine(gun, dtime(12, 0), tzinfo=ISTANBUL_TZ).astimezone(timezone.utc)
 
 
 def _kategoriler_arasi_adil_sec(ogeler: list[dict], sinir: int) -> list[dict]:
@@ -563,7 +578,8 @@ def _tara_calistir() -> dict:
             # gore yeniden yaziyoruz.
             o["tarih"] = istanbul_zaman.date().isoformat()
         else:
-            o["ilkGorulme"] = simdi
+            yaklasik = _tarihe_gore_yaklasik_zaman(o.get("tarih"))
+            o["ilkGorulme"] = yaklasik.isoformat(timespec="milliseconds") if yaklasik else simdi
         depo[o["url"]] = o
 
     silinen_urller = [url for url in depo.keys() if url not in guncel_url_seti]
@@ -652,6 +668,16 @@ def _depodaki_eski_saatleri_turkce_saate_cevir(depo: dict) -> int:
             referans_simdi = datetime.now(timezone.utc)
         zaman_utc = _saat_metnini_utc_zamanina_cevir(saat_metni, tarih, referans_simdi)
         if not zaman_utc:
+            # Saat bilgisi olmayan (sadece tarih iceren, ör. "Aug-23") eski
+            # kayitlarin ilkGorulme'si tarama anina esitlenmis olabilir; bu da
+            # gunler onceki bir haberi az once kesfedilmis gibi gosterip
+            # siralamayi bozar. O gunun ortasina (yaklasik) cekiyoruz.
+            yaklasik = _tarihe_gore_yaklasik_zaman(tarih_str)
+            if yaklasik:
+                yeni_ilkgorulme = yaklasik.isoformat(timespec="milliseconds")
+                if o.get("ilkGorulme") != yeni_ilkgorulme:
+                    o["ilkGorulme"] = yeni_ilkgorulme
+                    donusturulen += 1
             continue
         istanbul_zaman = zaman_utc.astimezone(ISTANBUL_TZ)
         o["saat"] = istanbul_zaman.strftime("%H:%M")
