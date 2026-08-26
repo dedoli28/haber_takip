@@ -24,20 +24,14 @@ AYARLAR_KEY = "htp:ayarlar"
 SAYAC_KEY = "htp:sayaclar"
 SON_TARAMA_KEY = "htp:son_tarama"
 SON_HATALAR_KEY = "htp:son_hatalar"
+SON_GONDERIM_KEY = "htp:son_gonderim"
 
 SINIF_ESIK_LISTESI = ["cok_onemli", "onemli", "bakmaya_deger"]
 
-# Her sinif icin {"aktif": bool, "esik": N} seklinde: aktif=False ise o sinif
-# icin o alici/ortak ayar hic e-posta gondermez (esik degeri yok sayilir).
-VARSAYILAN_ORTAK_ESIK = {
-    "cok_onemli": {"aktif": True, "esik": 15},
-    "onemli": {"aktif": True, "esik": 60},
-    "bakmaya_deger": {"aktif": True, "esik": 180},
-}
-
-# alicilar: [{"eposta": str, "esik": {sinif: {"aktif":bool,"esik":N}, ...} | None}, ...]
-# esik alani None (ya da bir sinif eksikse o sinif icin) ortak_esik kullanilir.
-VARSAYILAN_AYARLAR = {"ortak_esik": {s: dict(v) for s, v in VARSAYILAN_ORTAK_ESIK.items()}, "alicilar": []}
+# Esikler artik sabit (app.py'deki ESIKLER); kullanicinin ayarlayabildigi
+# tek sey bildirim e-postalari listesi.
+# alicilar: [{"eposta": str}, ...]
+VARSAYILAN_AYARLAR = {"alicilar": []}
 
 # Esik sayaclari aslinda alici basina "bekleyen" (henuz o aliciya e-postayla
 # bildirilmemis) haberlerin URL listesidir: {eposta: {sinif: [url, ...]}}.
@@ -127,3 +121,14 @@ def son_hatalar_yukle() -> list[str]:
 
 def son_hatalar_kaydet(hatalar: list[str]) -> None:
     _set_json(SON_HATALAR_KEY, hatalar)
+
+
+def son_gonderim_yukle() -> dict:
+    """Alici basina en son esik e-postasi gonderim zamani: {eposta: iso_zaman}.
+    Ardisik gonderimler arasinda asgari bekleme suresini uygulamak icin
+    kullanilir (spam hissi vermesin diye)."""
+    return _get_json(SON_GONDERIM_KEY, {})
+
+
+def son_gonderim_kaydet(son_gonderim: dict) -> None:
+    _set_json(SON_GONDERIM_KEY, son_gonderim)

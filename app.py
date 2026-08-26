@@ -2,23 +2,28 @@
 Haber Takip Platformu - Vercel icin web surumu (v2: surekli izleme).
 
 Mimari:
-  - /api/tara: disaridan (cron-job.org gibi ucretsiz bir servisten) periyodik
-    olarak cagrilir, POLL_SECRET ile korunur. Finviz'deki TUM haber turlerini
-    + bloglari ceker, daha once gorulmemis olanlari (bir seferde en fazla
-    MAX_YENI_HABER_BASINA_TARAMA kadar, kategoriler arasinda adil dagitarak,
-    zaman asimini asmamak icin) Gemini ile siniflandirir/ozetler/Turkce'ye
-    cevirir, Upstash Redis'teki kalici depoya ekler; artik Finviz'de
-    olmayanlari depodan siler. Her alici kendi esigine (ozel tanimlamadiysa
-    ortak/varsayilan esige) ulasinca kendisine ayrica e-posta gonderilir.
+  - /api/tara: disaridan (GitHub Actions/cron-job.org gibi bir servisten) her
+    15 dakikada bir cagrilir, POLL_SECRET ile korunur. Finviz'deki TUM haber
+    turlerini + bloglari PARALEL ceker, daha once gorulmemis olanlari (bir
+    seferde en fazla MAX_YENI_HABER_BASINA_TARAMA kadar, kategoriler arasinda
+    adil dagitarak, zaman asimini asmamak icin) Gemini ile
+    siniflandirir/ozetler/Turkce'ye cevirir, Upstash Redis'teki kalici depoya
+    ekler; artik Finviz'de olmayanlari depodan siler.
+  - Esik bildirimleri: esikler artik SABIT (ESIKLER: 10 cok onemli / 25 onemli
+    / 50 bakmaya deger), kullanici tarafindan degistirilemez. Gece sessiz
+    saatlerinde (00:00-06:00, Europe/Istanbul) esik e-postasi gonderilmez,
+    haberler sadece birikir. Bir aliciya en fazla MIN_GONDERIM_ARALIGI_DK'da
+    (90 dk) bir esik e-postasi gider.
+  - /api/sabah-ozeti: HARICI bir cron gorevi tarafindan her sabah 06:00'da
+    cagrilir; gece boyunca biriken cok_onemli haberleri toplu gonderir.
+  - /api/gun-sonu: HARICI bir cron gorevi tarafindan gunde bir kez (ör.
+    23:59) cagrilir; her aliciya gunun ozetini + esige hic ulasmayip
+    bildirilmemis kalan haberleri tek e-postada gonderir, sayaclari sifirlar.
   - /api/haberler: depodaki tum haberleri dondurur (istemci bunlari
-    tarih/tur/onem'e gore kendi tarafinda filtreler).
+    tarih/tur/onem/saat araligina gore kendi tarafinda filtreler/siralar).
   - /api/analiz, /api/gun-ozeti: istege bagli AI islemleri; sunucunun kendi
     GEMINI_API_KEY'ini kullanir (artik istemciden anahtar alinmiyor).
-  - /api/gun-sonu: HARICI ikinci bir cron-job.org gorevi tarafindan gunde bir
-    kez cagrilir; her aliciya gunun ozetini + esigine hic ulasmayip
-    bildirilmemis kalan haberleri tek e-postada gonderir. POLL_SECRET ile
-    korunur.
-  - /api/ayarlar: bildirim e-postalarini okur/yazar.
+  - /api/ayarlar: yalnizca bildirim e-postalarini (liste) okur/yazar.
 
 Statik arayuz (static_ui/) ayni uygulama uzerinden servis edilir.
 """
@@ -27,6 +32,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -70,16 +76,28 @@ MAX_YENI_HABER_BASINA_TARAMA = 20
 SINIF_ESIK_LISTESI = redis_store.SINIF_ESIK_LISTESI
 SINIF_ETIKET_TR = {"cok_onemli": "Çok Önemli", "onemli": "Önemli", "bakmaya_deger": "Bakmaya Değer"}
 
+# Esikler artik kullanicidan alinmiyor, sabit: herkes ayni sayilari kullanir.
+ESIKLER = {"cok_onemli": 10, "onemli": 25, "bakmaya_deger": 50}
+
+# Ayni alici arka arkaya cok sik esik e-postasi almasin diye, bir alici
+# ancak bu kadar dakikada bir esik e-postasi alabilir (esik erken asilsa
+# bile, bu sure dolana kadar biriken haberler e-postada bekletilir).
+MIN_GONDERIM_ARALIGI_DK = 90
+
+# Gece sessiz saatleri: bu saatler arasinda esik e-postasi GONDERILMEZ
+# (haberler yine de sayaca eklenmeye devam eder); sabah GECE_BITIS saatinde
+# /api/sabah-ozeti gece boyunca biriken cok_onemli haberleri toplu gonderir.
+GECE_BASLANGIC_SAAT = 0
+GECE_BITIS_SAAT = 6
+ISTANBUL_TZ = ZoneInfo("Europe/Istanbul")
+
 
 def _gemini_anahtari() -> str:
     return os.environ.get("GEMINI_API_KEY", "")
 
 
-def _alici_esikleri(alici: dict, ortak_esik: dict) -> dict:
-    """Alicinin sinif basina ozel esigi varsa onu, tanimlamadigi siniflar
-    icin ortak esigi kullanir (sinif bazinda birlestirme)."""
-    ozel = alici.get("esik") or {}
-    return {s: ozel.get(s, ortak_esik[s]) for s in SINIF_ESIK_LISTESI}
+def _istanbul_saati() -> datetime:
+    return datetime.now(ISTANBUL_TZ)
 
 
 def _kategoriler_arasi_adil_sec(ogeler: list[dict], sinir: int) -> list[dict]:
@@ -114,16 +132,17 @@ def haberler():
 
 @app.get("/api/durum")
 def durum():
-    """E-posta bildirim mekanizmasini teshis etmek icin: alici basina esik
-    ve bekleyen (henuz o aliciya mail atilmamis) haber sayilarini, e-posta
-    yapilandirmasinin sunucuda tanimli olup olmadigini gosterir."""
+    """E-posta bildirim mekanizmasini teshis etmek icin: alici basina bekleyen
+    (henuz o aliciya mail atilmamis) haber sayilarini, en son gonderim
+    zamanini ve e-posta yapilandirmasinin sunucuda tanimli olup olmadigini
+    gosterir."""
     try:
         bekleyenler_tum = redis_store.sayaclari_yukle()
         ayarlar = redis_store.ayarlar_yukle()
+        son_gonderim = redis_store.son_gonderim_yukle()
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
-    ortak_esik = ayarlar.get("ortak_esik") or {s: dict(v) for s, v in redis_store.VARSAYILAN_ORTAK_ESIK.items()}
     aliciler = ayarlar.get("alicilar", [])
 
     alici_durumlari = []
@@ -131,23 +150,24 @@ def durum():
         eposta = alici.get("eposta")
         if not eposta:
             continue
-        esikler = _alici_esikleri(alici, ortak_esik)
         bekleyen = bekleyenler_tum.get(eposta, {})
         alici_durumlari.append(
             {
                 "eposta": eposta,
-                "esikler": esikler,
                 "bekleyenSayilar": {s: len(bekleyen.get(s, [])) for s in SINIF_ESIK_LISTESI},
+                "sonGonderim": son_gonderim.get(eposta),
             }
         )
 
     return {
         "ok": True,
-        "ortakEsik": ortak_esik,
+        "esikler": ESIKLER,
+        "gunduzBaslangicSaat": GECE_BITIS_SAAT,
         "aliciDurumlari": alici_durumlari,
         "epostaYapilandirilmisMi": email_client.yapilandirilmis_mi(),
         "sonTarama": redis_store.son_tarama_yukle(),
         "sonHatalar": redis_store.son_hatalar_yukle(),
+        "istanbulSaati": _istanbul_saati().isoformat(),
     }
 
 
@@ -159,37 +179,20 @@ def ayarlar_getir():
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
 
-def _esik_gecerle(ham: dict | None, varsayilan: dict) -> dict:
-    """{"aktif": bool, "esik": N} seklindeki sinif basina esik verisini
-    dogrular/tamamlar; eksik/gecersiz alanlar icin varsayilana duser."""
-    esik = {}
-    for sinif in SINIF_ESIK_LISTESI:
-        ham_sinif = (ham or {}).get(sinif) or {}
-        aktif = bool(ham_sinif.get("aktif", varsayilan[sinif]["aktif"]))
-        try:
-            deger = int(ham_sinif.get("esik"))
-        except (TypeError, ValueError):
-            deger = varsayilan[sinif]["esik"]
-        esik[sinif] = {"aktif": aktif, "esik": max(1, deger)}
-    return esik
-
-
 @app.post("/api/ayarlar")
 async def ayarlar_guncelle(request: Request):
     body = await request.json()
 
-    ortak_esik = _esik_gecerle(body.get("ortak_esik"), redis_store.VARSAYILAN_ORTAK_ESIK)
-
     alicilar = []
+    gorulen_eposta: set[str] = set()
     for a in body.get("alicilar") or []:
         eposta = (a.get("eposta") or "").strip()
-        if not eposta:
+        if not eposta or eposta in gorulen_eposta:
             continue
-        ozel_ham = a.get("esik")
-        ozel = _esik_gecerle(ozel_ham, ortak_esik) if ozel_ham else None
-        alicilar.append({"eposta": eposta, "esik": ozel})
+        gorulen_eposta.add(eposta)
+        alicilar.append({"eposta": eposta})
 
-    yeni_ayarlar = {"ortak_esik": ortak_esik, "alicilar": alicilar}
+    yeni_ayarlar = {"alicilar": alicilar}
     try:
         redis_store.ayarlar_kaydet(yeni_ayarlar)
     except Exception as e:  # noqa: BLE001
@@ -367,44 +370,72 @@ def _esik_takibi_ve_bildirim(yeni_ogeler: list[dict], depo: dict) -> list[str]:
     """Yeni ogeleri alici basina bekleyen sayaclara ekler, esigi asan
     alicilere e-posta gonderir. Hem gercek taramada (/api/tara) hem sentetik
     test enjeksiyonunda (/api/sentetik-haber) kullanilir, boylece iki yol da
-    aynen tetikleme mantigindan gecer. Hata mesajlarinin listesini dondurur."""
+    aynen tetikleme mantigindan gecer.
+
+    Iki kisitlama uygulanir:
+      - Gece sessiz saatleri (00:00-06:00, Europe/Istanbul): bu saatlerde
+        esik e-postasi GONDERILMEZ, haberler sadece sayaca eklenir. Sabah
+        06:00'da /api/sabah-ozeti gece boyunca biriken cok_onemli haberleri
+        toplu gonderir.
+      - Alici basina MIN_GONDERIM_ARALIGI_DK: esik asilmis olsa bile, o
+        aliciya en son ne zaman mail gittiyse aradan bu kadar dakika
+        gecmeden yeni mail atilmaz (spam hissi vermesin diye); haberler
+        bekleyen listesinde birikmeye devam eder, sure dolunca gonderilir.
+
+    Hata mesajlarinin listesini dondurur."""
     hatalar: list[str] = []
 
     ayarlar = redis_store.ayarlar_yukle()
-    ortak_esik = ayarlar.get("ortak_esik") or {s: dict(v) for s, v in redis_store.VARSAYILAN_ORTAK_ESIK.items()}
     aliciler = [a for a in ayarlar.get("alicilar", []) if a.get("eposta")]
 
     bekleyenler_tum = redis_store.sayaclari_yukle()  # {eposta: {sinif: [url, ...]}}
 
     for alici in aliciler:
-        esikler = _alici_esikleri(alici, ortak_esik)
         bekleyen = bekleyenler_tum.setdefault(alici["eposta"], {s: [] for s in SINIF_ESIK_LISTESI})
         for o in yeni_ogeler:
             s = o.get("sinif")
-            if s in bekleyen and esikler.get(s, {}).get("aktif", True):
+            if s in bekleyen:
                 bekleyen[s].append(o["url"])
 
-    if aliciler and not email_client.yapilandirilmis_mi():
-        hatalar.append("GMAIL_ADDRESS / GMAIL_APP_PASSWORD tanımlı değil, e-posta gönderilemedi.")
-    elif aliciler:
-        for alici in aliciler:
-            eposta = alici["eposta"]
-            esikler = _alici_esikleri(alici, ortak_esik)
-            bekleyen = bekleyenler_tum[eposta]
-            tetiklenen = {
-                s: bekleyen[s]
-                for s in SINIF_ESIK_LISTESI
-                if esikler.get(s, {}).get("aktif", True) and len(bekleyen.get(s, [])) >= esikler[s]["esik"]
-            }
-            if not tetiklenen:
-                continue
+    simdi_istanbul = _istanbul_saati()
+    gece_mi = GECE_BASLANGIC_SAAT <= simdi_istanbul.hour < GECE_BITIS_SAAT
+
+    if aliciler and not gece_mi:
+        if not email_client.yapilandirilmis_mi():
+            hatalar.append("GMAIL_ADDRESS / GMAIL_APP_PASSWORD tanımlı değil, e-posta gönderilemedi.")
+        else:
+            son_gonderim = redis_store.son_gonderim_yukle()
+            for alici in aliciler:
+                eposta = alici["eposta"]
+                bekleyen = bekleyenler_tum[eposta]
+                tetiklenen = {
+                    s: bekleyen[s] for s in SINIF_ESIK_LISTESI if len(bekleyen.get(s, [])) >= ESIKLER[s]
+                }
+                if not tetiklenen:
+                    continue
+
+                son = son_gonderim.get(eposta)
+                if son:
+                    try:
+                        gecen_dk = (simdi_istanbul - datetime.fromisoformat(son)).total_seconds() / 60
+                    except ValueError:
+                        gecen_dk = MIN_GONDERIM_ARALIGI_DK
+                    if gecen_dk < MIN_GONDERIM_ARALIGI_DK:
+                        continue  # esik asildi ama cok yakin zamanda mail gitmis, biraz daha bekle
+
+                try:
+                    html = _esik_email_html(tetiklenen, depo)
+                    email_client.eposta_gonder([eposta], "Haber Takip Platformu - Yeni Önemli Haberler", html)
+                    for s in tetiklenen:
+                        bekleyen[s] = []
+                    son_gonderim[eposta] = simdi_istanbul.isoformat()
+                except Exception as e:  # noqa: BLE001
+                    hatalar.append(f"{eposta}: e-posta gönderilemedi: {e}")
+
             try:
-                html = _esik_email_html(tetiklenen, depo)
-                email_client.eposta_gonder([eposta], "Haber Takip Platformu - Yeni Önemli Haberler", html)
-                for s in tetiklenen:
-                    bekleyen[s] = []
+                redis_store.son_gonderim_kaydet(son_gonderim)
             except Exception as e:  # noqa: BLE001
-                hatalar.append(f"{eposta}: e-posta gönderilemedi: {e}")
+                hatalar.append(str(e))
 
     try:
         redis_store.sayaclari_kaydet(bekleyenler_tum)
@@ -717,6 +748,70 @@ def gun_sonu(request: Request):
         redis_store.son_hatalar_kaydet(hatalar)
     except Exception:  # noqa: BLE001
         pass  # tanilama amacli, istegi basarisiz saymaya degmez
+
+    return {"ok": True, "gonderilenSayisi": gonderilen, "hatalar": hatalar}
+
+
+@app.post("/api/sabah-ozeti")
+def sabah_ozeti(request: Request):
+    """Her sabah GECE_BITIS_SAAT'te (06:00, Europe/Istanbul), HARICI ucuncu
+    bir cron gorevi tarafindan gunde bir kez cagrilir: gece sessiz saatleri
+    (00:00-06:00) boyunca esik e-postasi gonderilmeden biriken cok_onemli
+    haberleri her aliciya toplu gonderir, ardindan yalnizca o alicinin
+    cok_onemli sayacini sifirlar (onemli/bakmaya_deger sayaclari etkilenmez,
+    normal akista ya gun icinde esigi asar ya da gun sonunda gonderilir).
+    /api/tara ile ayni POLL_SECRET korumasini kullanir."""
+    beklenen_sir = os.environ.get("POLL_SECRET")
+    if beklenen_sir:
+        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
+        if gelen_sir != beklenen_sir:
+            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+
+    try:
+        depo = redis_store.depo_yukle()
+        ayarlar = redis_store.ayarlar_yukle()
+        bekleyenler_tum = redis_store.sayaclari_yukle()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    aliciler = [a for a in ayarlar.get("alicilar", []) if a.get("eposta")]
+    if not aliciler:
+        return {"ok": True, "gonderilenSayisi": 0}
+
+    hatalar: list[str] = []
+    gonderilen = 0
+
+    if not email_client.yapilandirilmis_mi():
+        hatalar.append("GMAIL_ADDRESS / GMAIL_APP_PASSWORD tanımlı değil, e-posta gönderilemedi.")
+    else:
+        son_gonderim = redis_store.son_gonderim_yukle()
+        simdi_iso = _istanbul_saati().isoformat()
+        for alici in aliciler:
+            eposta = alici["eposta"]
+            bekleyen = bekleyenler_tum.get(eposta, {})
+            urller = bekleyen.get("cok_onemli", [])
+            if not urller:
+                continue
+            html = _esik_email_html({"cok_onemli": urller}, depo)
+            try:
+                email_client.eposta_gonder(
+                    [eposta], "Haber Takip Platformu - Gece Boyunca Gelen Çok Önemli Haberler", html
+                )
+                bekleyen["cok_onemli"] = []
+                son_gonderim[eposta] = simdi_iso
+                gonderilen += 1
+            except Exception as e:  # noqa: BLE001
+                hatalar.append(f"{eposta}: e-posta gönderilemedi: {e}")
+
+        try:
+            redis_store.son_gonderim_kaydet(son_gonderim)
+        except Exception as e:  # noqa: BLE001
+            hatalar.append(str(e))
+
+    try:
+        redis_store.sayaclari_kaydet(bekleyenler_tum)
+    except Exception as e:  # noqa: BLE001
+        hatalar.append(str(e))
 
     return {"ok": True, "gonderilenSayisi": gonderilen, "hatalar": hatalar}
 
