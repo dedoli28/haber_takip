@@ -554,7 +554,14 @@ def _tara_calistir() -> dict:
                 zaman_utc = None
         if zaman_utc:
             o["ilkGorulme"] = zaman_utc.isoformat(timespec="milliseconds")
-            o["saat"] = zaman_utc.astimezone(ISTANBUL_TZ).strftime("%H:%M")
+            istanbul_zaman = zaman_utc.astimezone(ISTANBUL_TZ)
+            o["saat"] = istanbul_zaman.strftime("%H:%M")
+            # finviz_scraper "tarih"i ABD Dogu gunune gore hesapliyor; bu
+            # Istanbul'da farkli bir takvim gunune denk gelebilir (ör. NY'de
+            # gece yarisina yakin bir haber Istanbul'da ertesi gune sarkar).
+            # "Bugun"/"Dun" filtresiyle tutarli olmasi icin Istanbul gunune
+            # gore yeniden yaziyoruz.
+            o["tarih"] = istanbul_zaman.date().isoformat()
         else:
             o["ilkGorulme"] = simdi
         depo[o["url"]] = o
@@ -569,6 +576,7 @@ def _tara_calistir() -> dict:
     # saat-cevirme ozelligi eklenmeden once kaydedilmis eski kayitlarin
     # saatini de geriye donuk Turkce saate cevirir.
     saat_donusturulen = _depodaki_eski_saatleri_turkce_saate_cevir(depo)
+    tarih_duzeltilen = _depodaki_tarihleri_istanbul_gunune_gore_duzelt(depo)
     mukerrer_temizlenen = _depoyu_mukerrerlerden_ayikla(depo)
     basarisiz_temizlenen = _depodan_basarisiz_siniflandirmalari_ayikla(depo)
 
@@ -594,6 +602,7 @@ def _tara_calistir() -> dict:
         "mukerrerTemizlenenSayisi": mukerrer_temizlenen,
         "basarisizTemizlenenSayisi": basarisiz_temizlenen,
         "saatDonusturulenSayisi": saat_donusturulen,
+        "tarihDuzeltilenSayisi": tarih_duzeltilen,
         "toplamDepo": len(depo),
         "taramaHatalari": tarama_hatalari,
         "siniflandirmaHatalari": siniflandirma_hatalari,
@@ -644,10 +653,33 @@ def _depodaki_eski_saatleri_turkce_saate_cevir(depo: dict) -> int:
         zaman_utc = _saat_metnini_utc_zamanina_cevir(saat_metni, tarih, referans_simdi)
         if not zaman_utc:
             continue
-        o["saat"] = zaman_utc.astimezone(ISTANBUL_TZ).strftime("%H:%M")
+        istanbul_zaman = zaman_utc.astimezone(ISTANBUL_TZ)
+        o["saat"] = istanbul_zaman.strftime("%H:%M")
         o["ilkGorulme"] = zaman_utc.isoformat(timespec="milliseconds")
+        o["tarih"] = istanbul_zaman.date().isoformat()
         donusturulen += 1
     return donusturulen
+
+
+def _depodaki_tarihleri_istanbul_gunune_gore_duzelt(depo: dict) -> int:
+    """'saat' alani zaten cevrilmis (HH:MM) olan ama 'tarih' alani hala eski
+    (bu duzeltmeden once ABD Dogu gunune gore hesaplanmis) kayitlarda, tarihi
+    ilkGorulme'nin Istanbul gunune gore yeniden hesaplar. Boylece 'Bugun'/'Dun'
+    filtresi ve tarih rozeti, gosterilen saatle tutarli olur."""
+    duzeltilen = 0
+    for o in depo.values():
+        saat_metni = o.get("saat") or ""
+        if not _SAAT_TR_FORMAT_RE.match(saat_metni):
+            continue
+        try:
+            zaman_utc = datetime.fromisoformat(o.get("ilkGorulme", ""))
+        except ValueError:
+            continue
+        dogru_tarih = zaman_utc.astimezone(ISTANBUL_TZ).date().isoformat()
+        if o.get("tarih") != dogru_tarih:
+            o["tarih"] = dogru_tarih
+            duzeltilen += 1
+    return duzeltilen
 
 
 def _depoyu_mukerrerlerden_ayikla(depo: dict) -> int:
