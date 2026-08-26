@@ -500,6 +500,12 @@ def _tara_calistir() -> dict:
     for url in silinen_urller:
         del depo[url]
 
+    # Her taramada otomatik bakim: gecmiste (ör. eski koddan kalma) olusmus
+    # mukerrer ya da cevrilmeden/ozetsiz kalmis kayitlari da temizler; boylece
+    # Ayarlar'daki bakim butonlarina elle basmaya normalde gerek kalmaz.
+    mukerrer_temizlenen = _depoyu_mukerrerlerden_ayikla(depo)
+    basarisiz_temizlenen = _depodan_basarisiz_siniflandirmalari_ayikla(depo)
+
     try:
         redis_store.depo_kaydet(depo)
         redis_store.son_tarama_kaydet(simdi)
@@ -519,6 +525,8 @@ def _tara_calistir() -> dict:
         "islenmeyenYeniSayisi": isleme_alinmayan_sayisi,
         "siniflandirilamayanSayisi": siniflandirilamayan_sayisi,
         "silinenSayisi": len(silinen_urller),
+        "mukerrerTemizlenenSayisi": mukerrer_temizlenen,
+        "basarisizTemizlenenSayisi": basarisiz_temizlenen,
         "toplamDepo": len(depo),
         "taramaHatalari": tarama_hatalari,
         "siniflandirmaHatalari": siniflandirma_hatalari,
@@ -540,18 +548,9 @@ def tara(request: Request):
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=e.status_code)
 
 
-@app.post("/api/depo-tekillestir")
-def depo_tekillestir():
-    """Ayarlar'daki 'Mükerrer Haberleri Temizle' butonu tarafindan cagrilir:
-    ayni (Turkce cevrilmis) basliga sahip mukerrer haberleri depodan siler
-    (en once gorulen kopya tutulur). Sadece kullanicinin kendi arayuzunden
-    tetiklendigi ve zararsiz/geri alinabilir bir islem oldugu icin (yalnizca
-    mukerrer kayitlari temizler) sir gerektirmez."""
-    try:
-        depo = redis_store.depo_yukle()
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
-
+def _depoyu_mukerrerlerden_ayikla(depo: dict) -> int:
+    """Ayni (Turkce cevrilmis) basliga sahip mukerrer haberleri depodan siler
+    (en once gorulen kopya tutulur). Silinen kayit sayisini dondurur."""
     sirali = sorted(depo.values(), key=lambda o: o.get("ilkGorulme", ""))
     gorulen_baslik: set[str] = set()
     silinecek_urller: list[str] = []
@@ -562,30 +561,16 @@ def depo_tekillestir():
             continue
         if b:
             gorulen_baslik.add(b)
-
     for url in silinecek_urller:
         del depo[url]
-
-    try:
-        redis_store.depo_kaydet(depo)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
-
-    return {"ok": True, "silinenSayisi": len(silinecek_urller), "kalanSayisi": len(depo)}
+    return len(silinecek_urller)
 
 
-@app.post("/api/basarisiz-siniflandirmalari-temizle")
-def basarisiz_siniflandirmalari_temizle():
-    """Ayarlar'daki 'Bozuk Kayıtları Temizle' butonu tarafindan cagrilir:
-    hala cevrilmemis/ozetsiz kalmis (baslikTr==baslik ve ai_ozet bos)
+def _depodan_basarisiz_siniflandirmalari_ayikla(depo: dict) -> int:
+    """Hala cevrilmemis/ozetsiz kalmis (baslikTr==baslik ve ai_ozet bos)
     haberleri depodan siler; boylece bir sonraki taramada tekrar 'yeni'
-    sayilip düzgün siniflandirilmaya calisilirlar. Zararsiz/geri alinabilir
-    bir islem oldugu icin sir gerektirmez."""
-    try:
-        depo = redis_store.depo_yukle()
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
-
+    sayilip yeniden siniflandirilmaya calisilirlar. Silinen kayit sayisini
+    dondurur."""
     silinecek_urller = [
         url
         for url, o in depo.items()
@@ -593,13 +578,49 @@ def basarisiz_siniflandirmalari_temizle():
     ]
     for url in silinecek_urller:
         del depo[url]
+    return len(silinecek_urller)
+
+
+@app.post("/api/depo-tekillestir")
+def depo_tekillestir():
+    """Ayarlar'daki 'Mükerrer Haberleri Temizle' butonu tarafindan elle de
+    cagrilabilir; ayni islem artik her /api/tara taramasinda otomatik
+    calistigi icin normalde gerek kalmaz. Zararsiz/geri alinabilir bir islem
+    oldugu icin sir gerektirmez."""
+    try:
+        depo = redis_store.depo_yukle()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    silinen = _depoyu_mukerrerlerden_ayikla(depo)
 
     try:
         redis_store.depo_kaydet(depo)
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
-    return {"ok": True, "silinenSayisi": len(silinecek_urller), "kalanSayisi": len(depo)}
+    return {"ok": True, "silinenSayisi": silinen, "kalanSayisi": len(depo)}
+
+
+@app.post("/api/basarisiz-siniflandirmalari-temizle")
+def basarisiz_siniflandirmalari_temizle():
+    """Ayarlar'daki 'Bozuk Kayıtları Temizle' butonu tarafindan elle de
+    cagrilabilir; ayni islem artik her /api/tara taramasinda otomatik
+    calistigi icin normalde gerek kalmaz. Zararsiz/geri alinabilir bir islem
+    oldugu icin sir gerektirmez."""
+    try:
+        depo = redis_store.depo_yukle()
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    silinen = _depodan_basarisiz_siniflandirmalari_ayikla(depo)
+
+    try:
+        redis_store.depo_kaydet(depo)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    return {"ok": True, "silinenSayisi": silinen, "kalanSayisi": len(depo)}
 
 
 @app.post("/api/gun-sonu")
