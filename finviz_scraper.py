@@ -17,6 +17,7 @@ fiyat degisimi) iliskilendirilmis. Bu yuzden ayri bir ayristirici kullanir;
 
 from __future__ import annotations
 
+import concurrent.futures
 import re
 from datetime import date, datetime
 from urllib.parse import urlparse
@@ -185,38 +186,57 @@ def finviz_haberlerini_cek(kategori: str = "ana") -> list[dict]:
     return _tabloyu_ayristir(tablo)
 
 
-def finviz_bloglarini_cek() -> list[dict]:
-    """Bloglar tablosu yalnizca ana (kategori parametresiz) sayfada, ikinci
-    tablo olarak bulunuyor; kategori seciminden bagimsizdir."""
-    soup = _sayfayi_getir(None)
-    tablolar = soup.select("table.styled-table-new")
-    if len(tablolar) < 2:
-        raise RuntimeError("Finviz sayfasında bloglar tablosu bulunamadı (site yapısı değişmiş olabilir).")
-    return _tabloyu_ayristir(tablolar[1])
-
-
 TUM_TURLER = ["ana", "hisse", "etf", "kripto", "pazar_nabzi", "blog"]
 
 
+def _ana_ve_blog_cek() -> dict[str, list[dict]]:
+    """'ana' ve 'blog' ayni varsayilan sayfadaki (ilk ve ikinci tablo) iki
+    farkli tablodur; sayfayi TEK seferde cekip her ikisini de oradan
+    ayristirmak, iki ayri HTTP istegi atmaktan daha hizlidir."""
+    soup = _sayfayi_getir(None)
+    tablolar = soup.select("table.styled-table-new")
+    if not tablolar:
+        raise RuntimeError("Finviz sayfasında haber tablosu bulunamadı (site yapısı değişmiş olabilir).")
+    if len(tablolar) < 2:
+        raise RuntimeError("Finviz sayfasında bloglar tablosu bulunamadı (site yapısı değişmiş olabilir).")
+    return {"ana": _tabloyu_ayristir(tablolar[0]), "blog": _tabloyu_ayristir(tablolar[1])}
+
+
 def tum_turleri_cek() -> tuple[list[dict], list[str]]:
-    """Tum haber kategorilerini + bloglari tek seferde ceker, her ogeye
-    'kategori' alanini ekler, URL'e gore tekillestirir. (haberler, hatalar)
-    tuple'i dondurur - bir kategori basarisiz olursa digerlerine devam eder."""
+    """Tum haber kategorilerini + bloglari PARALEL olarak ceker (Vercel/
+    cron-job.org zaman asimini asmamak icin - 5 istegi sirayla degil ayni
+    anda atar), her ogeye 'kategori' alanini ekler, URL'e gore tekillestirir.
+    (haberler, hatalar) tuple'i dondurur - bir kategori basarisiz olursa
+    digerlerine devam eder."""
     birlesik: list[dict] = []
     gorulen: set[str] = set()
     hatalar: list[str] = []
+    sonuclar: dict[str, list[dict]] = {}
+
+    gorevler = {
+        "ana_blog": _ana_ve_blog_cek,
+        "hisse": lambda: finviz_haberlerini_cek("hisse"),
+        "etf": lambda: finviz_haberlerini_cek("etf"),
+        "kripto": lambda: finviz_haberlerini_cek("kripto"),
+        "pazar_nabzi": lambda: finviz_haberlerini_cek("pazar_nabzi"),
+    }
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(gorevler)) as executor:
+        gelecek_ad = {executor.submit(fn): ad for ad, fn in gorevler.items()}
+        for gelecek in concurrent.futures.as_completed(gelecek_ad):
+            ad = gelecek_ad[gelecek]
+            try:
+                sonuc = gelecek.result()
+            except Exception as e:  # noqa: BLE001
+                hatalar.append(f"{'ana/blog' if ad == 'ana_blog' else ad}: {e}")
+                continue
+            if ad == "ana_blog":
+                sonuclar.update(sonuc)
+            else:
+                sonuclar[ad] = sonuc
 
     for kategori in TUM_TURLER:
-        try:
-            if kategori == "blog":
-                ogeler = finviz_bloglarini_cek()
-            else:
-                ogeler = finviz_haberlerini_cek(kategori=kategori)
-        except Exception as e:  # noqa: BLE001
-            hatalar.append(f"{kategori}: {e}")
-            continue
-
-        for o in ogeler:
+        for o in sonuclar.get(kategori, []):
             if o["url"] in gorulen:
                 continue
             gorulen.add(o["url"])
