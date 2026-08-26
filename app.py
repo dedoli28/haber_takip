@@ -419,7 +419,25 @@ def _tara_calistir() -> dict:
         raise TaramaHatasi(str(e)) from e
 
     guncel_url_seti = {o["url"] for o in guncel_ogeler}
-    tum_yeni_ogeler = [o for o in guncel_ogeler if o["url"] not in depo]
+
+    # Ayni haber farkli kategorilerde (ör. Piyasa + Pazar Nabzi) ya da
+    # taramalar arasinda degisen takip/yonlendirme parametreleriyle farkli
+    # URL'lerle gorunebiliyor. Sadece URL'e gore tekillestirmek bu durumda
+    # ayni haberi tekrar tekrar "yeni" sayip bildirimlerde/e-postada birebir
+    # tekrarlanmasina yol aciyordu; bu yuzden basliga gore de tekillestirilir.
+    mevcut_basliklar = {(o.get("baslik") or "").strip().lower() for o in depo.values() if o.get("baslik")}
+    tum_yeni_ogeler: list[dict] = []
+    gorulen_yeni_baslik: set[str] = set()
+    for o in guncel_ogeler:
+        if o["url"] in depo:
+            continue
+        baslik_norm = (o.get("baslik") or "").strip().lower()
+        if baslik_norm and (baslik_norm in mevcut_basliklar or baslik_norm in gorulen_yeni_baslik):
+            continue
+        if baslik_norm:
+            gorulen_yeni_baslik.add(baslik_norm)
+        tum_yeni_ogeler.append(o)
+
     yeni_ogeler = _kategoriler_arasi_adil_sec(tum_yeni_ogeler, MAX_YENI_HABER_BASINA_TARAMA)
     isleme_alinmayan_sayisi = len(tum_yeni_ogeler) - len(yeni_ogeler)
 
