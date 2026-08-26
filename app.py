@@ -57,7 +57,11 @@ app.add_middleware(
 )
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
-TARA_GRUP_BOYUTU = 20
+# 20'lik gruplar Gemini'de gercekten 10+ saniye surebiliyor (zaman asimi
+# degil, gercekten o kadar uretim suresi istiyor - 20 haberi cevirip
+# ozetlemek epey token demek). Daha kucuk gruplar hem daha hizli doner hem
+# de cron-job.org'un sabit 30 saniyelik siniri icinde kalma sansini artirir.
+TARA_GRUP_BOYUTU = 10
 # Bir /api/tara cagrisinda siniflandirilacak azami yeni haber sayisi. Finviz
 # taramasi + Gemini siniflandirmasi cron/Vercel zaman asimini asmasin diye
 # sinirlandirilir; kapasiteyi asan yeni haberler depoya eklenmez, bu yuzden

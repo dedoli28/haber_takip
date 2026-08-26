@@ -35,7 +35,7 @@ def gemini_json_iste(prompt: str, response_schema: dict, api_key: str, model: st
 
     for deneme in range(2):
         try:
-            resp = requests.post(url, params={"key": api_key}, json=body, timeout=10)
+            resp = requests.post(url, params={"key": api_key}, json=body, timeout=12)
         except Exception as e:  # noqa: BLE001
             son_hata = e
             time.sleep(1 * (deneme + 1))
