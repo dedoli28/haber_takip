@@ -62,7 +62,7 @@ TARA_GRUP_BOYUTU = 20
 # taramasi + Gemini siniflandirmasi cron/Vercel zaman asimini asmasin diye
 # sinirlandirilir; kapasiteyi asan yeni haberler depoya eklenmez, bu yuzden
 # bir sonraki taramada tekrar "yeni" olarak gorulup sirayla islenir.
-MAX_YENI_HABER_BASINA_TARAMA = 40
+MAX_YENI_HABER_BASINA_TARAMA = 20
 SINIF_ESIK_LISTESI = redis_store.SINIF_ESIK_LISTESI
 SINIF_ETIKET_TR = {"cok_onemli": "Çok Önemli", "onemli": "Önemli", "bakmaya_deger": "Bakmaya Değer"}
 
