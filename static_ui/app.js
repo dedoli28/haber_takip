@@ -628,14 +628,17 @@ function haberPaneliOlustur() {
       );
     }
 
-    const yon = siralama ? siralama.value : "onem_yeni";
+    const mod = siralama ? siralama.value : "tarih_yeni";
     gorulen = gorulen.slice().sort((a, b) => {
-      const oa = SINIF_ONEM_SIRA[a.sinif] ?? 99;
-      const ob = SINIF_ONEM_SIRA[b.sinif] ?? 99;
-      if (oa !== ob) return oa - ob;
       const ta = a.ilkGorulme ? new Date(a.ilkGorulme).getTime() : 0;
       const tb = b.ilkGorulme ? new Date(b.ilkGorulme).getTime() : 0;
-      return yon === "onem_eski" ? ta - tb : tb - ta;
+      if (mod === "onem") {
+        const oa = SINIF_ONEM_SIRA[a.sinif] ?? 99;
+        const ob = SINIF_ONEM_SIRA[b.sinif] ?? 99;
+        if (oa !== ob) return oa - ob;
+        return tb - ta;
+      }
+      return mod === "tarih_eski" ? ta - tb : tb - ta;
     });
 
     return gorulen;
