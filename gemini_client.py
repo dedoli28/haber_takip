@@ -28,14 +28,17 @@ def gemini_json_iste(prompt: str, response_schema: dict, api_key: str, model: st
 
     # 429 (istek limiti) ve 5xx (gecici sunucu yogunlugu/erisilemezligi, ör.
     # "high demand" 503) gecici sayilir ve tekrar denenir; digerleri kalicidir.
+    # Deneme sayisi ve bekleme sureleri kisa tutulur: /api/tara, cron-job.org'un
+    # ~30 saniyelik zaman asimi siniri icinde kalmak zorunda, uzun tekrar
+    # denemeleri tum taramanin zaman asimina ugramasina yol acabiliyor.
     GECICI_HATA_KODLARI = {500, 502, 503, 504}
 
-    for deneme in range(3):
+    for deneme in range(2):
         try:
-            resp = requests.post(url, params={"key": api_key}, json=body, timeout=25)
+            resp = requests.post(url, params={"key": api_key}, json=body, timeout=15)
         except Exception as e:  # noqa: BLE001
             son_hata = e
-            time.sleep(1.5 * (deneme + 1))
+            time.sleep(1 * (deneme + 1))
             continue
 
         if resp.status_code == 429:
@@ -45,12 +48,12 @@ def gemini_json_iste(prompt: str, response_schema: dict, api_key: str, model: st
                     "Kota genelde 24 saatte sıfırlanır; farklı bir API anahtarı/model de deneyebilirsiniz."
                 )
             son_hata = RuntimeError(f"Gemini istek limitine ulaşıldı (429): {resp.text[:200]}")
-            time.sleep(2 * (deneme + 1))
+            time.sleep(1 * (deneme + 1))
             continue
 
         if resp.status_code in GECICI_HATA_KODLARI:
             son_hata = RuntimeError(f"Gemini geçici olarak yoğun/erişilemez ({resp.status_code}): {resp.text[:200]}")
-            time.sleep(2 * (deneme + 1))
+            time.sleep(1 * (deneme + 1))
             continue
 
         if not resp.ok:
