@@ -541,17 +541,12 @@ def tara(request: Request):
 
 
 @app.post("/api/depo-tekillestir")
-def depo_tekillestir(request: Request):
-    """Yeni tekillestirme mantigi devreye girmeden ONCE depoya girmis olan,
-    ayni (Turkce cevrilmis) basliga sahip mukerrer haberleri hemen temizler
-    (en once gorulen kopya tutulur). /api/tara ile ayni POLL_SECRET korumasini
-    kullanir. Sadece bir kereye mahsus, gecmisi temizlemek icindir."""
-    beklenen_sir = os.environ.get("POLL_SECRET")
-    if beklenen_sir:
-        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
-        if gelen_sir != beklenen_sir:
-            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
-
+def depo_tekillestir():
+    """Ayarlar'daki 'Mükerrer Haberleri Temizle' butonu tarafindan cagrilir:
+    ayni (Turkce cevrilmis) basliga sahip mukerrer haberleri depodan siler
+    (en once gorulen kopya tutulur). Sadece kullanicinin kendi arayuzunden
+    tetiklendigi ve zararsiz/geri alinabilir bir islem oldugu icin (yalnizca
+    mukerrer kayitlari temizler) sir gerektirmez."""
     try:
         depo = redis_store.depo_yukle()
     except Exception as e:  # noqa: BLE001
@@ -580,19 +575,12 @@ def depo_tekillestir(request: Request):
 
 
 @app.post("/api/basarisiz-siniflandirmalari-temizle")
-def basarisiz_siniflandirmalari_temizle(request: Request):
-    """Yeni 'siniflandirilamayanlari depoya yazma' mantigi devreye girmeden
-    ONCE depoya girmis, hala cevrilmemis/ozetsiz kalmis (baslikTr==baslik ve
-    ai_ozet bos) haberleri depodan siler; boylece bir sonraki taramada
-    tekrar 'yeni' sayilip düzgün siniflandirilmaya calisilirlar. /api/tara
-    ile ayni POLL_SECRET korumasini kullanir. Sadece bir kereye mahsus,
-    gecmisi temizlemek icindir."""
-    beklenen_sir = os.environ.get("POLL_SECRET")
-    if beklenen_sir:
-        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
-        if gelen_sir != beklenen_sir:
-            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
-
+def basarisiz_siniflandirmalari_temizle():
+    """Ayarlar'daki 'Bozuk Kayıtları Temizle' butonu tarafindan cagrilir:
+    hala cevrilmemis/ozetsiz kalmis (baslikTr==baslik ve ai_ozet bos)
+    haberleri depodan siler; boylece bir sonraki taramada tekrar 'yeni'
+    sayilip düzgün siniflandirilmaya calisilirlar. Zararsiz/geri alinabilir
+    bir islem oldugu icin sir gerektirmez."""
     try:
         depo = redis_store.depo_yukle()
     except Exception as e:  # noqa: BLE001
