@@ -4,3 +4,4 @@ __pycache__/
 server.log
 .env
 .env.*
+!.env.example

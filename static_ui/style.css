@@ -18,10 +18,14 @@
   --border: #232838;
   --border-soft: #1b1f2a;
   --text: #e8eaf0;
-  --text-muted: #8b93a7;
-  --text-faint: #5b6274;
+  --text-muted: #a0a8bb;   /* kart/panel uzerinde >= 6.7:1 */
+  --text-faint: #8790a5;   /* >= 5.0:1 (eskiden 2.9:1) */
   --accent: #4f7cff;
-  --accent-hover: #3f6bef;
+  --accent-strong: #3a63e8; /* dolu butonlar: beyaz metinle 5.1:1 */
+  --accent-hover: #2f56d6;
+  --up: #34d399;
+  --down: #f87171;
+  --chart-grid: #232838;
   --accent-soft: rgba(79,124,255,.14);
   --danger: #ef4444;
   --shadow-card: 0 1px 2px rgba(0,0,0,.3);
@@ -45,10 +49,14 @@ html[data-theme="light"] {
   --border: #e4e6ee;
   --border-soft: #ececf2;
   --text: #1a1d27;
-  --text-muted: #6b7284;
-  --text-faint: #9aa0b1;
+  --text-muted: #4b5468;   /* >= 6.7:1 */
+  --text-faint: #5f6880;   /* >= 4.9:1 (eskiden 2.6:1) */
   --accent: #3b66e0;
+  --accent-strong: #3b66e0;
   --accent-hover: #2f56c9;
+  --up: #15803d;
+  --down: #b91c1c;
+  --chart-grid: #e4e6ee;
   --accent-soft: rgba(59,102,224,.10);
   --shadow-card: 0 1px 2px rgba(20,22,40,.06);
   --shadow-card-hover: 0 10px 26px rgba(20,22,40,.10);
@@ -66,6 +74,21 @@ html, body {
 }
 button, input, select { font-family: inherit; font-size: inherit; color: inherit; }
 ::selection { background: var(--accent-soft); }
+
+/* ===================== Erisilebilirlik temeli ===================== */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sr-only {
+  position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+.skip-link {
+  position: fixed; top: 8px; left: 8px; z-index: 1000; padding: 10px 14px; border-radius: 8px;
+  background: var(--accent-strong); color: #fff; font-weight: 700; text-decoration: none;
+  transform: translateY(-160%); transition: transform .15s ease;
+}
+.skip-link:focus { transform: translateY(0); }
+#main:focus { outline: none; }
 
 /* scrollbars */
 * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
@@ -99,7 +122,7 @@ button, input, select { font-family: inherit; font-size: inherit; color: inherit
 }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand-name {
-  font-weight: 800; font-size: 15.5px; letter-spacing: -.01em; color: var(--text);
+  margin: 0; font-weight: 800; font-size: 15.5px; letter-spacing: -.01em; color: var(--text);
 }
 .tabs { position: relative; display: flex; gap: 4px; background: var(--bg-input); padding: 4px; border-radius: 10px; }
 .tabs-thumb {
@@ -137,7 +160,7 @@ button, input, select { font-family: inherit; font-size: inherit; color: inherit
 .btn-icon { flex-shrink: 0; }
 /* Ayarlar dişlisi: her ekranda tam 18x18, flex kapsayıcıda küçülmez/büyümez. */
 .gear-icon { width: 18px; height: 18px; flex: 0 0 18px; }
-.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary { background: var(--accent-strong); color: #fff; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); }
 .btn-primary:disabled { opacity: .55; cursor: not-allowed; }
 .btn-outline { background: transparent; border-color: var(--border); color: var(--text); }
@@ -175,12 +198,14 @@ button, input, select { font-family: inherit; font-size: inherit; color: inherit
   font-size: 13px; font-weight: 700; color: var(--text); display: block; margin-bottom: 10px;
 }
 
-select, input[type="text"], input[type="password"], input[type="number"] {
+select, input[type="text"], input[type="search"], input[type="email"], input[type="password"], input[type="number"] {
   background: var(--bg-input); border: 1px solid var(--border); color: var(--text);
   border-radius: 8px; padding: 7px 11px; outline: none; min-height: 32px;
   transition: border-color .15s ease; width: 100%;
 }
 select:focus, input:focus { border-color: var(--accent); }
+input[type="search"]::-webkit-search-cancel-button { filter: grayscale(1) opacity(.6); }
+input[type="search"] { -webkit-appearance: none; appearance: none; }
 select { min-width: 170px; cursor: pointer; width: auto; }
 
 input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
@@ -216,7 +241,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
   background: var(--chip-c, var(--accent)); border-color: var(--chip-c, var(--accent)); color: #fff;
   animation: chipPop .28s cubic-bezier(.34,1.56,.64,1);
 }
-.chip-all.is-active { background: var(--accent); border-color: var(--accent); }
+.chip-all.is-active { background: var(--accent-strong); border-color: var(--accent-strong); }
 @keyframes chipPop { 0% { transform: scale(.9); } 60% { transform: scale(1.06); } 100% { transform: scale(1); } }
 .chip-row-tight { margin-bottom: 0; gap: 6px; }
 
@@ -225,9 +250,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 .filter-badge {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
-  background: #fff; color: var(--accent); font-size: 10px; font-weight: 800;
+  background: #fff; color: var(--accent-strong); font-size: 10px; font-weight: 800;
 }
-.btn-outline .filter-badge { background: var(--accent); color: #fff; }
+.btn-outline .filter-badge { background: var(--accent-strong); color: #fff; }
 .filter-popover {
   display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 60;
   width: 340px; max-width: 86vw; max-height: 70vh; overflow-y: auto;
@@ -260,6 +285,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 }
 @keyframes cardIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .item-card:hover { background: var(--bg-card-hover); box-shadow: var(--shadow-card-hover); transform: translateY(-1px); }
+.item-card:active { transform: translateY(0); }
 
 .item-stripe { width: 4px; border-radius: 4px; flex-shrink: 0; align-self: stretch; }
 .item-body { flex: 1; min-width: 0; }
@@ -289,10 +315,20 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
 html[data-theme="light"] .ulke-TR { color: #be123c; }
 html[data-theme="light"] .ulke-US { color: #0369a1; }
 html[data-theme="light"] .ulke-DE { color: #0f766e; }
-html[data-theme="light"] .ulke-CN { color: #c2410c; }
+html[data-theme="light"] .ulke-CN { color: #b93a08; }
+html[data-theme="light"] .ulke-diger { color: #4b5563; }
+/* Acik temada rozet metinleri (eskiden 1.5-2.3:1) WCAG AA'yi saglayacak sekilde koyulastirildi. */
+html[data-theme="light"] .c-cok_onemli .badge, html[data-theme="light"] .badge-cok_onemli { color: #b91c1c; }
+html[data-theme="light"] .c-onemli .badge, html[data-theme="light"] .badge-onemli { color: #92400e; }
+html[data-theme="light"] .c-bakmaya_deger .badge, html[data-theme="light"] .badge-bakmaya_deger { color: #1d4ed8; }
+html[data-theme="light"] .c-onemsiz .badge, html[data-theme="light"] .badge-onemsiz { color: #4b5563; }
+html[data-theme="light"] .kategori-tag { color: #6d28d9; }
 
 .item-title { font-size: 14.5px; font-weight: 700; line-height: 1.4; margin: 0 0 4px; color: var(--text); }
-.item-summary { font-size: 12.5px; line-height: 1.55; color: var(--text-muted); margin: 0; }
+.item-summary {
+  font-size: 12.5px; line-height: 1.55; color: var(--text-muted); margin: 0;
+  display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
 
 /* class color variants */
 .c-cok_onemli .item-stripe { background: #ef4444; }
@@ -395,18 +431,8 @@ html[data-theme="light"] .skeleton-card::after {
 
 /* ===================== Credit ===================== */
 .credit-watermark {
-  position: fixed;
-  bottom: 8px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font-style: italic;
-  font-size: 11px;
-  color: var(--text-faint);
-  opacity: 0.45;
-  pointer-events: none;
-  user-select: none;
-  z-index: 1;
+  text-align: center; font-style: italic; font-size: 11px; color: var(--text-faint);
+  padding: 6px 0 4px; user-select: none;
 }
 
 /* ===================== Toasts ===================== */
@@ -465,3 +491,277 @@ html[data-theme="light"] .skeleton-card::after {
 @media (max-width: 380px) {
   .tab-btn { padding: 6px 8px; font-size: 11.5px; }
 }
+
+
+/* =====================================================================
+   Piyasa Görünümü, Haber Nabzı, haber detay grafiği ve arayüz iyileştirmeleri
+   ===================================================================== */
+
+/* ---------- Araç çubuğu / durum satırı / aktif filtre etiketleri ---------- */
+.control-row .field-grow { flex: 1 1 260px; }
+.status-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  margin: 10px 2px 0; font-size: 12px; color: var(--text-muted);
+}
+.status-meta time { color: var(--text); font-weight: 600; }
+.status-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px;
+  background: var(--bg-input); border: 1px solid var(--border-soft); font-size: 11.5px; color: var(--text-muted);
+}
+.status-chip b { color: var(--text); font-variant-numeric: tabular-nums; }
+.status-uyari { color: var(--text); border-color: #f59e0b; background: rgba(245,158,11,.12); font-weight: 600; }
+
+.active-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.active-filters[hidden] { display: none; }
+.filter-tag {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 11px; min-height: 30px;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--bg-input);
+  color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+.filter-tag:hover { border-color: var(--danger); }
+.filter-tag .filter-tag-x { color: var(--text-muted); font-size: 13px; line-height: 1; }
+.filter-tag:hover .filter-tag-x { color: var(--danger); }
+.filter-tag-temizle { background: transparent; color: var(--text-muted); }
+
+/* ---------- Kart iskeleti (yüklenirken kart ölçüsünde) ---------- */
+.skeleton-card { height: 122px; }
+.skeleton-card::before {
+  content: ""; position: absolute; left: 14px; right: 14px; top: 18px; height: 56px;
+  background:
+    linear-gradient(var(--border-soft), var(--border-soft)) 0 0 / 46% 10px no-repeat,
+    linear-gradient(var(--border-soft), var(--border-soft)) 0 22px / 92% 12px no-repeat,
+    linear-gradient(var(--border-soft), var(--border-soft)) 0 42px / 70% 10px no-repeat;
+  opacity: .8;
+}
+
+/* ---------- Piyasa paneli ---------- */
+.market-panel {
+  background: var(--bg-panel); border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg); margin-bottom: 10px; overflow: hidden;
+}
+.market-toggle {
+  width: 100%; display: flex; align-items: center; gap: 14px; min-height: 48px;
+  padding: 9px 14px; background: transparent; border: 0; cursor: pointer; text-align: left; color: var(--text);
+  transition: background .15s ease;
+}
+.market-toggle:hover { background: var(--bg-card-hover); }
+.market-title { font-weight: 800; font-size: 13.5px; white-space: nowrap; }
+.market-ozet {
+  display: flex; align-items: baseline; gap: 10px; flex: 1; min-width: 0; overflow: hidden;
+  font-size: 12.5px; color: var(--text-muted); white-space: nowrap;
+}
+.market-ozet-ad { overflow: hidden; text-overflow: ellipsis; }
+.market-ozet-deger { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.market-ozet-soluk { color: var(--text-faint); }
+.market-chevron { flex-shrink: 0; color: var(--text-muted); transition: transform .2s ease; }
+.market-toggle[aria-expanded="true"] .market-chevron { transform: rotate(180deg); }
+.market-body { padding: 0 14px 14px; border-top: 1px solid var(--border-soft); animation: fadeIn .2s ease; }
+.market-body[hidden] { display: none; }
+
+.up { color: var(--up); }
+.down { color: var(--down); }
+.flat { color: var(--text-muted); }
+.market-ozet-degisim, .market-anlik-degisim { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.market-scroll {
+  display: flex; align-items: center; gap: 6px; overflow-x: auto; padding: 2px 1px;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.market-scroll::-webkit-scrollbar { display: none; }
+.market-scroll > * { flex: 0 0 auto; }
+.market-scroll[hidden] { display: none; }
+
+.market-ana-sekmeler { margin-top: 6px; border-bottom: 1px solid var(--border-soft); }
+.market-sekme {
+  border: 0; background: transparent; color: var(--text-muted); font-weight: 700; font-size: 13px;
+  padding: 9px 13px; min-height: 40px; border-radius: 8px 8px 0 0; cursor: pointer; white-space: nowrap;
+  transition: color .15s ease, background .15s ease;
+}
+.market-sekme:hover { color: var(--text); }
+.market-ana-sekmeler .market-sekme.is-active { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+#marketUlkeSekmeleri .market-sekme {
+  border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; min-height: 36px;
+}
+#marketUlkeSekmeleri .market-sekme.is-active { background: var(--accent-strong); border-color: var(--accent-strong); color: #fff; box-shadow: none; }
+
+.market-mini {
+  border: 1px solid var(--border); background: transparent; color: var(--text-muted); font-weight: 700; font-size: 12px;
+  padding: 6px 11px; min-height: 34px; min-width: 34px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.market-mini:hover:not(:disabled) { color: var(--text); background: var(--bg-input); }
+.market-mini[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+.market-mini:disabled { opacity: .45; cursor: not-allowed; }
+.market-ikon { font-size: 16px; line-height: 1; padding: 4px 10px; }
+.market-segment { display: inline-flex; gap: 0; }
+.market-segment .market-mini:first-child { border-radius: 8px 0 0 8px; }
+.market-segment .market-mini:last-child { border-radius: 0 8px 8px 0; margin-left: -1px; }
+
+.market-kontroller { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; margin-top: 12px; }
+.market-kontroller-alt { margin-top: 8px; }
+
+.market-anlik { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 14px 0 4px; min-height: 34px; }
+/* Endeks adlari (ör. "Shanghai Composite") Turkce dil ayariyla buyuk harfe cevrilirse "SHANGHAİ" olur; bu yuzden buyuk harf dönüşümü yok. */
+.market-anlik-ad { font-size: 13px; font-weight: 700; color: var(--text-muted); }
+.market-anlik-deger { font-size: 26px; font-weight: 800; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.market-anlik-degisim { font-size: 14px; }
+.market-anlik-zaman { font-size: 12px; color: var(--text-muted); }
+
+.market-rozet {
+  display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700;
+  background: var(--bg-input); border: 1px solid var(--border); color: var(--text-muted);
+}
+.market-rozet-uyari { border-color: #f59e0b; background: rgba(245,158,11,.12); color: var(--text); }
+.market-rozet-mock { border-color: #ef4444; background: rgba(239,68,68,.12); color: var(--text); }
+
+.market-grafik-kutusu { position: relative; --chart-h: clamp(300px, 32vw, 400px); }
+.market-chart, .detail-market-chart { width: 100%; height: var(--chart-h); border-radius: 10px; }
+.market-chart:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.market-nabiz-kutusu { min-height: 240px; }
+.detail-market-kutu { --chart-h: 210px; }
+
+.market-iskelet {
+  position: absolute; inset: 0; display: flex; align-items: flex-end; gap: 10px; padding: 24px 10px 16px;
+  background: var(--bg-panel); border-radius: 10px;
+}
+.market-iskelet[hidden], .market-durum[hidden] { display: none; }
+.market-iskelet span { flex: 1; border-radius: 6px 6px 0 0; background: var(--border-soft); animation: skeletonPulse 1.4s ease-in-out infinite; }
+.market-iskelet span:nth-child(1) { height: 38%; } .market-iskelet span:nth-child(2) { height: 56%; animation-delay: .1s; }
+.market-iskelet span:nth-child(3) { height: 46%; animation-delay: .2s; } .market-iskelet span:nth-child(4) { height: 72%; animation-delay: .3s; }
+.market-iskelet span:nth-child(5) { height: 60%; animation-delay: .4s; } .market-iskelet span:nth-child(6) { height: 82%; animation-delay: .5s; }
+@keyframes skeletonPulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+.market-durum {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 20px; text-align: center; background: var(--bg-panel); border-radius: 10px;
+}
+.market-durum-mesaj { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--text); max-width: 420px; line-height: 1.5; }
+.market-durum-ek { margin: 0; font-size: 12.5px; color: var(--text-muted); max-width: 420px; line-height: 1.5; }
+
+.market-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 10px 2px 0; font-size: 11.5px; color: var(--text-faint); }
+
+.market-tablo-kutusu { max-height: 280px; overflow: auto; margin-top: 10px; border: 1px solid var(--border-soft); border-radius: 10px; }
+.market-tablo-kutusu[hidden] { display: none; }
+.market-tablo { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.market-tablo caption { text-align: left; padding: 8px 10px; font-weight: 700; color: var(--text-muted); }
+.market-tablo th, .market-tablo td { padding: 6px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border-soft); }
+.market-tablo th[scope="row"], .market-tablo thead th:first-child { text-align: left; }
+.market-tablo thead th { position: sticky; top: 0; background: var(--bg-panel); color: var(--text-muted); font-size: 11px; }
+
+/* Haber Nabzı */
+.market-nabiz { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding-top: 12px; }
+.market-nabiz[hidden] { display: none; }
+.nabiz-kart { margin: 0; padding: 10px 12px 6px; background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 12px; min-width: 0; }
+.nabiz-kart figcaption { font-size: 12.5px; font-weight: 700; margin-bottom: 4px; }
+.nabiz-kart figcaption small { font-weight: 500; color: var(--text-faint); }
+.nabiz-genis { grid-column: 1 / -1; }
+.nabiz-grafik { width: 100%; height: 230px; }
+.nabiz-genis .nabiz-grafik { height: 200px; }
+
+/* Haber detayı: ilgili piyasa hareketi */
+.detail-market { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-soft); }
+.detail-market[hidden] { display: none; }
+.detail-market-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+#detailMarketBaslik { text-transform: none; letter-spacing: 0; font-size: 12.5px; }
+.detail-market-aciklama { font-size: 12px; color: var(--text-muted); margin: 0 0 8px; line-height: 1.5; }
+.detail-market-aciklama[hidden] { display: none; }
+.detail-market-anlik { display: flex; align-items: baseline; gap: 10px; min-height: 26px; margin-bottom: 4px; }
+.detail-market-deger { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* Ayarlar durumu, alıcı listesi, gün özeti eylemleri */
+.alici-listesi { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.ayar-durum {
+  margin: 10px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--bg-input);
+  border-left: 3px solid var(--text-faint); font-size: 12.5px; color: var(--text); line-height: 1.5;
+}
+.ayar-durum[hidden] { display: none; }
+.ayar-durum.ok { border-left-color: #22c55e; }
+.ayar-durum.hata { border-left-color: var(--danger); }
+.ayar-durum.yukleniyor { border-left-color: var(--accent); }
+.alici-iskelet { height: 46px; border-radius: var(--radius-md); background: var(--bg-card); border: 1px solid var(--border-soft); position: relative; overflow: hidden; }
+.alici-iskelet::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.05), transparent); animation: shimmer 1.4s infinite; }
+html[data-theme="light"] .alici-iskelet::after { background: linear-gradient(90deg, transparent, rgba(0,0,0,.04), transparent); }
+button.alici-sil-btn { border: 0; background: transparent; min-width: 36px; min-height: 36px; border-radius: 8px; font-size: 14px; }
+button.alici-sil-btn:hover { background: var(--bg-input); }
+.day-summary-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.day-summary-actions[hidden] { display: none; }
+.day-summary-uyari { font-size: 12px; color: var(--text); background: rgba(245,158,11,.12); border-left: 3px solid #f59e0b; border-radius: 8px; padding: 8px 12px; margin: 0 0 12px; line-height: 1.5; }
+
+/* ---------- Ekran boyutları ---------- */
+@media (max-width: 1100px) {
+  .market-nabiz { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .market-nabiz .nabiz-genis { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  /* Araç çubuğu: arama tam genişlik; filtre + sıralama yan yana; yenile + özet yan yana */
+  .control-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .control-row .field-grow { grid-column: 1 / -1; flex: none; }
+  .control-row .field-spacer { display: none; }
+  .control-row .filter-popover-wrap .btn, .control-row .btn { width: 100%; justify-content: center; }
+  .control-row .field select { width: 100%; min-width: 0; }
+
+  .market-toggle { gap: 8px; padding: 9px 12px; }
+  .market-title { font-size: 13px; }
+  /* Dar ekranda endeks adı görsel olarak gizlenir ama ekran okuyucular için erişilebilir kalır. */
+  .market-ozet-ad {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+    clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  }
+  .market-ozet { position: relative; }
+  .market-body { padding: 0 12px 12px; }
+  .market-kontroller { flex-direction: column; align-items: stretch; gap: 8px; }
+  .market-grafik-kutusu { --chart-h: 300px; }
+  .detail-market-kutu { --chart-h: 220px; }
+  .market-anlik-deger { font-size: 24px; }
+  .market-nabiz { grid-template-columns: 1fr; }
+  .nabiz-grafik { height: 220px; }
+
+  /* Modal pencereler: mobilde alt panel (bottom sheet) */
+  .modal-overlay.is-open { align-items: flex-end; justify-content: center; }
+  .modal, .modal-wide {
+    width: 100%; max-width: 100%; height: auto; max-height: 92dvh; border-radius: 18px 18px 0 0;
+    padding: 10px 16px calc(20px + env(safe-area-inset-bottom));
+    animation: sheetUp .3s cubic-bezier(.2, .8, .2, 1) backwards;
+  }
+  .modal::before { content: ""; display: block; width: 40px; height: 4px; border-radius: 4px; background: var(--border); margin: 0 auto 12px; }
+}
+@keyframes sheetUp { from { transform: translateY(28px); opacity: .5; } to { transform: none; opacity: 1; } }
+
+/* ---------- Dokunmatik hedefler (~44px) ---------- */
+@media (pointer: coarse), (max-width: 640px) {
+  .btn, .btn-sm { min-height: 44px; }
+  .chip { min-height: 44px; padding: 8px 16px; }
+  .icon-btn { width: 44px; height: 44px; }
+  .tab-btn { min-height: 44px; }
+  select, input[type="text"], input[type="search"], input[type="email"], input[type="number"] { min-height: 44px; }
+  .market-mini, .market-sekme { min-height: 44px; min-width: 44px; }
+  #marketUlkeSekmeleri .market-sekme { min-height: 44px; }
+  .filter-tag { min-height: 44px; }
+  button.alici-sil-btn { min-width: 44px; min-height: 44px; }
+  .header-actions #openSettings { width: 44px; height: 44px; min-width: 44px; }
+}
+
+/* ---------- Azaltılmış hareket ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important; scroll-behavior: auto !important;
+  }
+  .topbar-progress.is-active { animation: none; }
+  .market-iskelet span, .skeleton-card::after, .alici-iskelet::after { animation: none; }
+}
+
+/* Sağlayıcı yapılandırılmamışken: kontroller anlamsız olduğundan gizlenir, kompakt boş durum gösterilir. */
+.market-panel.is-yapilandirilmadi .market-kontroller,
+.market-panel.is-yapilandirilmadi .market-anlik { display: none; }
+.market-panel.is-yapilandirilmadi .market-grafik-kutusu { --chart-h: 150px; margin-top: 12px; }
+.market-panel.is-yapilandirilmadi .market-durum { border: 1px dashed var(--border); }
+.nabiz-grafik { height: 250px; }
+
+@media (max-width: 640px) {
+  /* Bildirimler üstte: alt panellerin (bottom sheet) düğmelerini örtmesin. */
+  .toast-stack { top: calc(8px + env(safe-area-inset-top)); bottom: auto; }
+}
+
+.market-tablo-kutusu:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

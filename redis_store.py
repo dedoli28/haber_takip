@@ -200,3 +200,27 @@ def istek_siniri_asildi_mi(anahtar: str, azami_istek: int, pencere_sn: int) -> b
             )
             resp.raise_for_status()
     return sayac > azami_istek
+
+
+# ------------------------------------------------------------------ Onbellek
+# Piyasa verisi onbellegi ve tek-ucus (single-flight) kilidi icin kucuk
+# yardimcilar. Hepsi tek /pipeline istegidir; deger JSON metni olarak saklanir.
+def onbellek_oku(anahtar: str) -> str | None:
+    yanit = _pipeline([["GET", anahtar]])
+    return yanit[0].get("result")
+
+
+def onbellek_yaz(anahtar: str, deger: str, ttl_sn: int) -> None:
+    yanit = _pipeline([["SET", anahtar, deger, "EX", int(ttl_sn)]])
+    if "error" in yanit[0]:
+        raise RuntimeError("Redis onbellek yazma hatasi.")
+
+
+def kilit_al(anahtar: str, ttl_sn: int) -> bool:
+    """SET NX EX: kilit bossa alir (True), baskasinda ise False doner."""
+    yanit = _pipeline([["SET", anahtar, "1", "NX", "EX", int(ttl_sn)]])
+    return yanit[0].get("result") == "OK"
+
+
+def kilit_birak(anahtar: str) -> None:
+    _pipeline([["DEL", anahtar]])

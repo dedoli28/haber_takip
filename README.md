@@ -71,6 +71,65 @@ zamanını modalın altında gösterir.
 `POST /api/gun-sonu` (gün sonu e-postası) önce Redis'te **bugün** üretilmiş
 hazır özeti kullanır; yoksa bir kez üretip Redis'e kaydeder.
 
+## Piyasa Görünümü ve Haber Nabzı
+
+Haberler sekmesinde, araç çubuğu ile kartlar arasında başlangıçta kompakt duran,
+genişletilebilir bir **Piyasa Görünümü** vardır: Türkiye / ABD / Almanya / Çin
+sekmeleri, ülkenin ana endeksi (BIST 100, S&P 500 + NASDAQ, DAX, Shanghai
+Composite), son değer, değişim, 1G-1H-1A-3A-1Y aralıkları, çizgi/mum grafiği,
+tooltip (açılış/en yüksek/en düşük/kapanış/hacim), yakınlaştırma-kaydırma-sıfırlama
+ve tablo görünümü. İkinci sekme **Haber Nabzı** son 24 saatin haber sayılarını
+(saatlik, ülke, tür, önem) gösterir. Haber detayında haberle *güvenilir* biçimde
+eşleşen bir hisse kodu (yalnızca Pazar Nabzı haberlerinde tek bir "(TICKER)"
+varsa) ya da haberin ülkesinin ana endeksi, haberin zamanını gösteren dikey
+çizgiyle çizilir; hiçbiri yoksa bölüm hiç oluşturulmaz.
+
+- **Sağlayıcı katmanı:** `market_data_provider.py` (sağlayıcıdan bağımsız arayüz +
+  Twelve Data + yalnızca-geliştirme `mock`), `market_data_service.py` (doğrulama,
+  önbellek, tek-uçuş, hız sınırı), `market_symbols.py` (**tek yapılandırma dosyası**:
+  izinli endeksler, sağlayıcı sembol/kod eşlemeleri, aralıklar, TTL'ler). Arayüz
+  sembol/sağlayıcı bilmez; `GET /api/market/config`'ten okur.
+- **Güvenlik:** tarayıcı sağlayıcıyı asla doğrudan çağırmaz; API anahtarı yalnızca
+  sunucu ortam değişkenindedir ve Authorization başlığıyla gönderilir (URL'e/loga
+  yazılmaz). Yalnızca `market_symbols.py`'deki endeksler ve haberlerde geçen
+  hisse kodları kabul edilir; başka semboller sağlayıcıya gönderilmez. Hata
+  yanıtları genel mesaj taşır, sağlayıcı ayrıntısı sızmaz.
+- **Önbellek (Redis + bellek):** gün içi 2-5 dk, uzun dönem 15-30 dk; sağlayıcı hata
+  verirse son başarılı kayıt "eski veri" olarak gösterilir; aynı anahtar için
+  eş zamanlı istekler tek sağlayıcı çağrısına indirgenir; dakikalık çağrı
+  bütçesi (`MARKET_DATA_MAX_CALLS_PER_MIN`) uygulanır. Sahte fiyat **asla**
+  üretimde gösterilmez; veri yoksa "Piyasa verisi şu anda alınamıyor" durumu çıkar.
+- **Uç noktalar:** `GET /api/market/config`, `/api/market/overview?country=TR`,
+  `/api/market/history?symbol=XU100&range=1D[&interval=5m]`,
+  `/api/news/statistics?range=24h`. `/api/haberler` yanıtındaki bazı haberlere
+  `iliskiliSembol` alanı eklenir (depoya yazılmaz, anlık türetilir).
+- **Redis anahtarları (yeni):** `htp:market:v1:h:<sembol>:<aralık>:<mum>:<sağlayıcı>`
+  (mum serisi), `htp:market:v1:q:<sembol>:<sağlayıcı>` (anlık değer), her birinin
+  `:kilit` eşi (20 sn SET NX EX) ve `htp:market:butce:<dakika>` (INCR+EXPIRE).
+  Mevcut anahtarlar ve haber veri modeli **değişmedi**.
+- **Grafik kütüphanesi:** Apache ECharts 5.6 (`static_ui/vendor/`, Apache-2.0,
+  LICENSE/NOTICE ile birlikte), yalnızca grafik gerektiğinde yüklenir.
+
+### Sağlayıcı seçimi, lisans ve kotalar (ÖNEMLİ)
+
+Kod bugün **Twelve Data** ile çalışacak şekilde yazılmıştır (Authorization
+başlığı, `time_series` + `quote`). Twelve Data'nın herkese açık kataloğunda
+`XU100` (BIST 100), `GDAXI` (DAX) ve `000001` (SSE Composite) listelenir;
+**S&P 500 (`SPX`) ve NASDAQ (`IXIC`) herkese açık katalogda görünmez** — bu
+kapsam planınıza bağlı olabilir, anahtarı aldıktan sonra doğrulayın (kapsam
+dışıysa arayüz o endeks için "veri yok" durumunu gösterir).
+
+**Lisans:** Twelve Data bireysel planları "kişisel, dahili ve ticari olmayan"
+kullanım içindir; ücretsiz Basic plan *internal non-display* kullanımdır (800
+kredi/gün, 8 kredi/dk). Bu uygulama **herkese açık** bir web sitesi olduğu için
+verileri ziyaretçilere göstermek için sağlayıcının **gösterim (display) lisansı**
+gereken bir plan (iş/business lisansı) gerekir; sağlayıcının güncel kullanım
+şartlarını ve önbellekleme/yeniden dağıtım kurallarını satın almadan önce
+sağlayıcıdan yazılı teyit edin. Bu proje bunu sizin yerinize kararlaştırmaz ve
+API anahtarı içermez. Başka bir sağlayıcı için `PiyasaVeriSaglayici`
+arayüzünü uygulayıp `saglayici_al()`'a eklemek ve `market_symbols.py`'ye
+o sağlayıcının sembol eşlemesini yazmak yeterlidir.
+
 ## Ortam değişkenleri
 
 | Değişken | Zorunlu | Açıklama |
@@ -83,6 +142,10 @@ hazır özeti kullanır; yoksa bir kez üretip Redis'e kaydeder.
 | `ALLOWED_ORIGINS` | hayır | CORS için ek izinli originler, virgülle ayrılmış (ör. `https://ornek.com,https://baska.com`). |
 | `GMAIL_ADDRESS` | e-posta için | Bildirimleri gönderecek Gmail adresi. |
 | `GMAIL_APP_PASSWORD` | e-posta için | Google hesabında 2 adımlı doğrulama açıldıktan sonra "Uygulama Şifreleri"nden oluşturulan 16 haneli şifre (normal Gmail şifreniz değildir). |
+| `MARKET_DATA_PROVIDER` | piyasa grafikleri için | `twelvedata`. Boşsa piyasa görünümü "yapılandırılmadı" gösterir (haberler etkilenmez). |
+| `MARKET_DATA_API_KEY` | piyasa grafikleri için | Sağlayıcı API anahtarı; yalnızca sunucuda okunur, istemciye asla gönderilmez. |
+| `MARKET_DATA_MAX_CALLS_PER_MIN` | hayır | Dakikada azami sağlayıcı çağrısı (varsayılan 6). |
+| `MARKET_DATA_ALLOW_MOCK` | hayır | YALNIZCA geliştirme: `MARKET_DATA_PROVIDER=mock` ile sahte seri. Vercel production'da etkinleşmez. |
 
 Gizli değerleri (API anahtarı, token, secret) asla koda veya repoya yazmayın;
 Vercel'de *Project → Settings → Environment Variables* bölümünden girin.
@@ -137,6 +200,14 @@ python -m uvicorn app:app --reload
 ```
 
 Tarayıcıda `http://127.0.0.1:8000` adresini aç.
+
+Testler (ağ/anahtar gerektirmez):
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests -q
+```
+
 
 ## Vercel'e yayınlama
 

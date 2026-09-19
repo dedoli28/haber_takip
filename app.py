@@ -54,16 +54,20 @@ import hashlib
 import hmac
 import os
 import re
-from datetime import date, datetime, time as dtime, timezone
+import time
+from datetime import date, datetime, time as dtime, timedelta, timezone
 from html import escape as _html_kacis
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import email_client
+import market_data_service
+import market_symbols
 import redis_store
 from finviz_scraper import _saat_metnini_utc_zamanina_cevir, haber_grubu, tum_turleri_cek
 from gemini_client import (
@@ -102,6 +106,9 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "X-Poll-Secret"],
 )
+# /api/haberler (yuzlerce haber) ve statik dosyalar (grafik kutuphanesi) icin
+# yanit boyutunu kucultur.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
 # 20'lik gruplar Gemini'de gercekten 10+ saniye surebiliyor (zaman asimi
@@ -224,7 +231,162 @@ def haberler():
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
     ogeler = sorted(depo.values(), key=lambda o: o.get("ilkGorulme", ""), reverse=True)
-    return {"ok": True, "haberler": ogeler, "sonTarama": redis_store.son_tarama_yukle()}
+    # Haberle GUVENILIR bicimde iliskilendirilebilen tek bir hisse kodu varsa
+    # (yalnizca Pazar Nabzi), haber detayindaki piyasa grafigi icin eklenir.
+    zengin = []
+    for o in ogeler:
+        sembol = market_symbols.haber_sembolu(o)
+        zengin.append({**o, "iliskiliSembol": sembol} if sembol else o)
+    return {"ok": True, "haberler": zengin, "sonTarama": redis_store.son_tarama_yukle()}
+
+
+# ------------------------------------------------------------ Piyasa verisi
+_HISSE_KUMESI_TTL_SN = 60
+_hisse_kumesi_onbellek: dict = {"zaman": 0.0, "kume": frozenset()}
+
+
+def _haber_hisse_sembolleri() -> frozenset[str]:
+    """Depodaki haberlerde gecen (guvenilir) hisse kodlari: haber detayi
+    grafigi icin disariya SORULABILECEK tek hisse kumesi. Kullanici girdisi
+    dogrudan saglayiciya gitmesin diye izin listesi buradan turetilir."""
+    simdi = time.time()
+    if simdi - _hisse_kumesi_onbellek["zaman"] < _HISSE_KUMESI_TTL_SN:
+        return _hisse_kumesi_onbellek["kume"]
+    depo = redis_store.depo_yukle()
+    kume = frozenset(s for s in (market_symbols.haber_sembolu(o) for o in depo.values()) if s)
+    _hisse_kumesi_onbellek.update(zaman=simdi, kume=kume)
+    return kume
+
+
+def _hisse_sembolu_dogrula(sembol: str) -> bool:
+    try:
+        return sembol in _haber_hisse_sembolleri()
+    except Exception:  # noqa: BLE001 - dogrulanamayan sembol reddedilir
+        return False
+
+
+def _piyasa_yaniti(yanit: dict, onbellek_sn: int) -> JSONResponse:
+    """Taze basarili yanit kisa sure kenarda (CDN) onbelleklenir; eski veri ve
+    hatalar asla."""
+    basliklar = {"Cache-Control": "no-store"}
+    if onbellek_sn > 0:
+        basliklar["Cache-Control"] = f"public, max-age=0, s-maxage={min(onbellek_sn, 1800)}"
+    return JSONResponse(yanit, headers=basliklar)
+
+
+def _piyasa_hatasi(e: market_data_service.PiyasaHatasi) -> JSONResponse:
+    basliklar = {"Cache-Control": "no-store"}
+    if e.retry_after:
+        basliklar["Retry-After"] = str(e.retry_after)
+    return JSONResponse({"ok": False, "kod": e.kod, "hata": e.mesaj}, status_code=e.http, headers=basliklar)
+
+
+@app.get("/api/market/config")
+def piyasa_yapilandirma():
+    """Ulke/endeks/aralik tanimlari (saglayiciya baglanmaz, her zaman calisir)."""
+    return JSONResponse(market_data_service.yapilandirma(), headers={"Cache-Control": "public, max-age=0, s-maxage=300"})
+
+
+@app.get("/api/market/overview")
+def piyasa_genel_bakis(country: str = Query("TR", max_length=4)):
+    try:
+        yanit, sn = market_data_service.genel_bakis(country)
+    except market_data_service.PiyasaHatasi as e:
+        return _piyasa_hatasi(e)
+    return _piyasa_yaniti(yanit, sn)
+
+
+@app.get("/api/market/history")
+def piyasa_gecmis(
+    symbol: str = Query(..., max_length=12),
+    range_: str = Query("1D", alias="range", max_length=4),
+    interval: str | None = Query(None, max_length=4),
+):
+    try:
+        yanit, sn = market_data_service.gecmis(symbol, range_, interval, hisse_dogrulayici=_hisse_sembolu_dogrula)
+    except market_data_service.PiyasaHatasi as e:
+        return _piyasa_hatasi(e)
+    return _piyasa_yaniti(yanit, sn)
+
+
+# ------------------------------------------------------------ Haber istatistikleri
+HABER_ISTATISTIK_ARALIKLARI = {"24h": 24}
+KATEGORI_ETIKET_KISA = {
+    "ana": "Piyasa",
+    "hisse": "Hisse",
+    "etf": "ETF",
+    "kripto": "Kripto",
+    "pazar_nabzi": "Pazar Nabzı",
+    "blog": "Blog",
+}
+SINIF_SIRA = ["cok_onemli", "onemli", "bakmaya_deger", "onemsiz"]
+SINIF_ETIKET_TUM = {**SINIF_ETIKET_TR, "onemsiz": "Önemsiz"}
+
+
+def _haber_istatistikleri_hesapla(depo: dict, simdi_utc: datetime, saat: int = 24) -> dict:
+    """Son `saat` saatte (Istanbul saat dilimine gore, icinde bulunulan saat
+    dahil) ilk kez goruldugu (ilkGorulme) zamana gore haber sayilari."""
+    bitis = simdi_utc.astimezone(ISTANBUL_TZ).replace(minute=0, second=0, microsecond=0)
+    baslangic = bitis - timedelta(hours=saat - 1)
+    saatlik = [0] * saat
+    ulkeler: dict[str, int] = {}
+    kategoriler: dict[str, int] = {}
+    siniflar: dict[str, int] = {}
+    toplam = 0
+    for o in depo.values():
+        try:
+            t = datetime.fromisoformat(o["ilkGorulme"]).astimezone(ISTANBUL_TZ)
+        except (KeyError, ValueError, TypeError):
+            continue
+        idx = int((t - baslangic).total_seconds() // 3600)
+        if t < baslangic or idx >= saat:
+            continue
+        saatlik[idx] += 1
+        toplam += 1
+        u = _ulke_kodu(o)
+        ulkeler[u] = ulkeler.get(u, 0) + 1
+        k = o.get("kategori") or "ana"
+        kategoriler[k] = kategoriler.get(k, 0) + 1
+        s = o.get("sinif") or "bakmaya_deger"
+        siniflar[s] = siniflar.get(s, 0) + 1
+
+    return {
+        "ok": True,
+        "range": f"{saat}h",
+        "generated_at": simdi_utc.isoformat(timespec="seconds"),
+        "total": toplam,
+        "hourly": [
+            {"hour_start": (baslangic + timedelta(hours=i)).isoformat(timespec="minutes"), "count": saatlik[i]}
+            for i in range(saat)
+        ],
+        "by_country": [
+            {"key": u, "label": market_symbols.ULKELER.get(u, u), "count": ulkeler[u]}
+            for u in [*ULKE_SIRA, *[x for x in ulkeler if x not in ULKE_SIRA]]
+            if u in ulkeler
+        ],
+        "by_category": [
+            {"key": k, "label": KATEGORI_ETIKET_KISA.get(k, k), "count": c}
+            for k, c in sorted(kategoriler.items(), key=lambda kv: -kv[1])
+        ],
+        "by_importance": [
+            {"key": s, "label": SINIF_ETIKET_TUM.get(s, s), "count": siniflar[s]}
+            for s in SINIF_SIRA
+            if s in siniflar
+        ],
+    }
+
+
+@app.get("/api/news/statistics")
+def haber_istatistikleri(range_: str = Query("24h", alias="range", max_length=4)):
+    saat = HABER_ISTATISTIK_ARALIKLARI.get(range_.strip().lower())
+    if saat is None:
+        return JSONResponse({"ok": False, "kod": "gecersiz_parametre", "hata": "Geçersiz aralık."}, status_code=400)
+    try:
+        depo = redis_store.depo_yukle()
+    except Exception:  # noqa: BLE001 - ayrinti istemciye gonderilmez
+        return JSONResponse({"ok": False, "kod": "depo_hatasi", "hata": "Haber verisi şu anda alınamıyor."}, status_code=503)
+    yanit = _haber_istatistikleri_hesapla(depo, datetime.now(timezone.utc), saat)
+    return JSONResponse(yanit, headers={"Cache-Control": "public, max-age=0, s-maxage=60"})
 
 
 @app.get("/api/durum")
