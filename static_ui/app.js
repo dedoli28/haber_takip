@@ -2,6 +2,7 @@
 
 /* ===================== Ayarlar ===================== */
 const KAYDEDILEN_KEY = "kaydedilen_haberler_v1";
+const AYARLAR_SECRET_KEY = "haber_takip_ayarlar_secret";
 const OTOMATIK_YENILEME_MS = 60 * 1000; // arka plandaki gercek tarama sunucuda (cron) calisir; burada sadece depoyu tazeleriz
 
 const SINIF_ETIKET = {
@@ -20,6 +21,7 @@ const KATEGORI_ETIKET = {
 };
 const KATEGORI_SIRA = ["ana", "hisse", "etf", "kripto", "pazar_nabzi", "blog"];
 const SINIF_ONEM_SIRA = { cok_onemli: 0, onemli: 1, bakmaya_deger: 2, onemsiz: 3 };
+const ULKE_ETIKET = { TR: "Türkiye", US: "ABD", DE: "Almanya", CN: "Çin" };
 
 /* ===================== Helpers ===================== */
 function $(id) { return document.getElementById(id); }
@@ -179,6 +181,15 @@ function filtreRozetGuncelle(rozetId, sayac) {
 /* ===================== Ayarlar modal (bildirim e-postaları) ===================== */
 let mevcutAyarlar = { alicilar: [] };
 
+function ayarlarSecretAl() {
+  let secret = sessionStorage.getItem(AYARLAR_SECRET_KEY) || "";
+  if (!secret) {
+    secret = (prompt("Ayarları açmak için yönetim sırrını gir:") || "").trim();
+    if (secret) sessionStorage.setItem(AYARLAR_SECRET_KEY, secret);
+  }
+  return secret;
+}
+
 function aliciListesiCiz() {
   const kutu = $("epostaListesi");
   kutu.innerHTML = "";
@@ -221,9 +232,15 @@ function aliciListesiCiz() {
 
 async function ayarlarYukle() {
   try {
-    const resp = await fetch("/api/ayarlar");
+    const secret = ayarlarSecretAl();
+    if (!secret) return;
+    const resp = await fetch("/api/ayarlar", { headers: { "X-Settings-Secret": secret } });
     const yanit = await resp.json();
-    if (!yanit.ok) { toast(yanit.hata || "Ayarlar alınamadı.", "error"); return; }
+    if (!yanit.ok) {
+      if (resp.status === 401) sessionStorage.removeItem(AYARLAR_SECRET_KEY);
+      toast(resp.status === 401 ? "Yönetim sırrı hatalı." : (yanit.hata || "Ayarlar alınamadı."), "error");
+      return;
+    }
 
     mevcutAyarlar = { alicilar: yanit.ayarlar.alicilar || [] };
 
@@ -235,9 +252,11 @@ async function ayarlarYukle() {
 
 async function ayarlariKaydet(basariMesaji) {
   try {
+    const secret = ayarlarSecretAl();
+    if (!secret) return;
     const resp = await fetch("/api/ayarlar", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Settings-Secret": secret },
       body: JSON.stringify(mevcutAyarlar),
     });
     const yanit = await resp.json();
@@ -246,6 +265,7 @@ async function ayarlariKaydet(basariMesaji) {
       aliciListesiCiz();
       if (basariMesaji) toast(basariMesaji, "ok");
     } else {
+      if (resp.status === 401) sessionStorage.removeItem(AYARLAR_SECRET_KEY);
       toast(yanit.hata || "Kaydedilemedi.", "error");
     }
   } catch (e) {
@@ -259,6 +279,7 @@ function epostaGecerliMi(eposta) {
 
 function ayarlarBaslat() {
   $("openSettings").addEventListener("click", () => {
+    if (!ayarlarSecretAl()) return;
     $("settingsOverlay").classList.add("is-open");
     ayarlarYukle();
   });
@@ -332,7 +353,8 @@ function detayGoster(h) {
   $("detailBadge").textContent = SINIF_ETIKET[h.sinif] || h.sinif;
   $("detailBadge").className = `badge badge-${h.sinif}`;
   const katEtiket = h.kategori && KATEGORI_ETIKET[h.kategori] ? ` · ${KATEGORI_ETIKET[h.kategori]}` : "";
-  $("detailMeta").textContent = `${h.saat} · ${h.kaynak}${katEtiket}`;
+  const ulkeEtiket = h.ulke && ULKE_ETIKET[h.ulke] ? ` · ${ULKE_ETIKET[h.ulke]}` : "";
+  $("detailMeta").textContent = `${h.saat} · ${h.kaynak}${ulkeEtiket}${katEtiket}`;
   $("detailTitle").textContent = h.baslikTr || h.baslik;
 
   const origEl = $("detailOriginalTitle");
@@ -442,7 +464,10 @@ async function gunuOzetle() {
     const resp = await fetch("/api/gun-ozeti", { method: "POST" });
     const yanit = await resp.json();
     if (!yanit.ok) {
-      $("daySummaryBody").innerHTML = `<p class="detail-summary">${yanit.hata || "Özet alınamadı."}</p>`;
+      const hata = document.createElement("p");
+      hata.className = "detail-summary";
+      hata.textContent = yanit.hata || "Özet alınamadı.";
+      $("daySummaryBody").replaceChildren(hata);
       toast(yanit.hata || "Özet alınamadı.", "error");
       return;
     }
@@ -481,8 +506,18 @@ async function gunuOzetle() {
     genelOzet.className = "detail-summary";
     genelOzet.textContent = yanit.genelOzet || "";
     govde.appendChild(genelOzet);
+
+    if (yanit.olusturulmaZamani) {
+      const zaman = document.createElement("p");
+      zaman.className = "summary-generated-at";
+      zaman.textContent = `Son hazırlanma: ${new Date(yanit.olusturulmaZamani).toLocaleString("tr-TR")}`;
+      govde.appendChild(zaman);
+    }
   } catch (e) {
-    $("daySummaryBody").innerHTML = `<p class="detail-summary">Beklenmeyen hata: ${e}</p>`;
+    const hata = document.createElement("p");
+    hata.className = "detail-summary";
+    hata.textContent = `Beklenmeyen hata: ${e}`;
+    $("daySummaryBody").replaceChildren(hata);
   }
 }
 
@@ -511,6 +546,13 @@ function kartOlustur(h, index, tiklaninca) {
     katTag.className = "kategori-tag";
     katTag.textContent = KATEGORI_ETIKET[h.kategori];
     metaRow.appendChild(katTag);
+  }
+
+  if (h.ulke && ULKE_ETIKET[h.ulke]) {
+    const ulkeTag = document.createElement("span");
+    ulkeTag.className = `ulke-tag ulke-${h.ulke.toLowerCase()}`;
+    ulkeTag.textContent = ULKE_ETIKET[h.ulke];
+    metaRow.appendChild(ulkeTag);
   }
 
   const meta = document.createElement("span");
@@ -570,6 +612,9 @@ function haberPaneliOlustur() {
   const kategori = cokluSecimGrubuBaslat(
     document.querySelectorAll("#haberKategoriChips .chip"), "kategori", () => { rozetGuncelle(); ciz(); }
   );
+  const ulke = cokluSecimGrubuBaslat(
+    document.querySelectorAll("#haberUlkeChips .chip"), "ulke", () => { rozetGuncelle(); ciz(); }
+  );
   const sinif = cokluSecimGrubuBaslat(
     document.querySelectorAll("#haberChips .chip"), "sinif", () => { rozetGuncelle(); ciz(); }
   );
@@ -583,7 +628,7 @@ function haberPaneliOlustur() {
 
   function rozetGuncelle() {
     const saatSeciliMi = saatBaslangic.value !== "" || saatBitis.value !== "";
-    const sayac = (tarih.durum.deger ? 1 : 0) + kategori.secili.size + sinif.secili.size + (saatSeciliMi ? 1 : 0);
+    const sayac = (tarih.durum.deger ? 1 : 0) + kategori.secili.size + ulke.secili.size + sinif.secili.size + (saatSeciliMi ? 1 : 0);
     filtreRozetGuncelle("haberFiltreRozet", sayac);
   }
 
@@ -594,6 +639,7 @@ function haberPaneliOlustur() {
   $("haberFiltreTemizleBtn").addEventListener("click", () => {
     tarih.temizle();
     kategori.temizle();
+    ulke.temizle();
     sinif.temizle();
     saatBaslangic.value = "";
     saatBitis.value = "";
@@ -607,6 +653,7 @@ function haberPaneliOlustur() {
     let gorulen = state.tumOgeler;
     if (sinif.secili.size > 0) gorulen = gorulen.filter((h) => sinif.secili.has(h.sinif));
     if (kategori.secili.size > 0) gorulen = gorulen.filter((h) => kategori.secili.has(h.kategori));
+    if (ulke.secili.size > 0) gorulen = gorulen.filter((h) => ulke.secili.has(h.ulke || "US"));
     if (tarih.durum.deger === "bugun") gorulen = gorulen.filter((h) => h.tarih === bugununTarihi());
     if (tarih.durum.deger === "dun") gorulen = gorulen.filter((h) => h.tarih === dununTarihi());
     if (saatBaslangic.value !== "" || saatBitis.value !== "") {
@@ -688,7 +735,7 @@ function haberPaneliOlustur() {
 
       if (yanit.sonTarama) {
         const t = new Date(yanit.sonTarama);
-        $("haberSonTarama").textContent = `Sistem arka planda otomatik olarak Finviz'i tarıyor. Son tarama: ${t.toLocaleString("tr-TR")}`;
+        $("haberSonTarama").textContent = `Sistem arka planda haber kaynaklarını tarıyor. Son tarama: ${t.toLocaleString("tr-TR")}`;
       }
     } catch (e) {
       if (!sessiz) toast("Beklenmeyen hata: " + e, "error");
@@ -709,6 +756,9 @@ function kayitliPaneliOlustur() {
   const kategori = cokluSecimGrubuBaslat(
     document.querySelectorAll("#kayitliKategoriChips .chip"), "kategori", () => { rozetGuncelle(); ciz(); }
   );
+  const ulke = cokluSecimGrubuBaslat(
+    document.querySelectorAll("#kayitliUlkeChips .chip"), "ulke", () => { rozetGuncelle(); ciz(); }
+  );
   const sinif = cokluSecimGrubuBaslat(
     document.querySelectorAll("#kayitliChips .chip"), "sinif", () => { rozetGuncelle(); ciz(); }
   );
@@ -716,11 +766,12 @@ function kayitliPaneliOlustur() {
   filtrePopoverBaslat("kayitliFiltreBtn", "kayitliFiltrePopover");
 
   function rozetGuncelle() {
-    filtreRozetGuncelle("kayitliFiltreRozet", kategori.secili.size + sinif.secili.size);
+    filtreRozetGuncelle("kayitliFiltreRozet", kategori.secili.size + ulke.secili.size + sinif.secili.size);
   }
 
   $("kayitliFiltreTemizleBtn").addEventListener("click", () => {
     kategori.temizle();
+    ulke.temizle();
     sinif.temizle();
     rozetGuncelle();
     ciz();
@@ -736,6 +787,7 @@ function kayitliPaneliOlustur() {
     let gorulen = liste;
     if (sinif.secili.size > 0) gorulen = gorulen.filter((h) => sinif.secili.has(h.sinif));
     if (kategori.secili.size > 0) gorulen = gorulen.filter((h) => kategori.secili.has(h.kategori));
+    if (ulke.secili.size > 0) gorulen = gorulen.filter((h) => ulke.secili.has(h.ulke || "US"));
     if (state.arama) {
       const q = state.arama.toLowerCase();
       gorulen = gorulen.filter(

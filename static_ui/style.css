@@ -143,6 +143,8 @@ button, input, select { font-family: inherit; font-size: inherit; color: inherit
 .btn-outline:disabled { opacity: .4; cursor: not-allowed; }
 .btn-ghost { background: transparent; color: var(--text-muted); border-color: var(--border); }
 .btn-ghost:hover { color: var(--text); background: var(--bg-input); }
+#openSettings { min-width: 34px; height: 34px; }
+#openSettings svg { display: block; width: 18px; height: 18px; flex: 0 0 18px; }
 .btn-sm { padding: 7px 13px; font-size: 12.5px; }
 
 /* ===================== Main / views ===================== */
@@ -273,6 +275,15 @@ input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px;
   padding: 2px 7px; border-radius: 5px;
   background: rgba(139,92,246,.14); color: #a78bfa;
 }
+.ulke-tag {
+  font-size: 10px; font-weight: 700; letter-spacing: .02em;
+  padding: 2px 7px; border-radius: 5px;
+  background: rgba(100,116,139,.15); color: var(--text-muted);
+}
+.ulke-tr { background: rgba(239,68,68,.13); color: #f87171; }
+.ulke-us { background: rgba(59,130,246,.13); color: #60a5fa; }
+.ulke-de { background: rgba(245,158,11,.13); color: #fbbf24; }
+.ulke-cn { background: rgba(220,38,38,.13); color: #fb7185; }
 
 .item-title { font-size: 14.5px; font-weight: 700; line-height: 1.4; margin: 0 0 4px; color: var(--text); }
 .item-summary { font-size: 12.5px; line-height: 1.55; color: var(--text-muted); margin: 0; }
@@ -360,6 +371,7 @@ html[data-theme="light"] .skeleton-card::after {
   color: var(--text-faint); margin: 0 0 6px;
 }
 .detail-summary { font-size: 13.5px; line-height: 1.7; color: var(--text-muted); margin: 0; }
+.summary-generated-at { margin: 16px 0 0; font-size: 11px; color: var(--text-faint); }
 
 .detail-analiz-block {
   margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-soft);
@@ -413,6 +425,7 @@ html[data-theme="light"] .skeleton-card::after {
   .header-actions { gap: 4px; }
   .header-actions .btn-label { display: none; }
   .header-actions .btn { padding: 8px 10px; }
+  #openSettings { width: 34px; padding: 0; justify-content: center; }
 
   .app-main { padding: 10px 10px 24px; }
 
