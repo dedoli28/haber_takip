@@ -27,6 +27,9 @@ SON_HATALAR_KEY = "htp:son_hatalar"
 SON_GONDERIM_KEY = "htp:son_gonderim"
 BEKLEYEN_SINIFLANDIRMA_KEY = "htp:bekleyen_siniflandirma"
 SON_SINIFLANDIRMA_KEY = "htp:son_siniflandirma"
+# Onceden uretilmis "Gunun Ozeti": {kategoriler, genelOzet, olusturulmaZamani,
+# haberSayisi}. "Gunu Ozetle" butonu Gemini'yi cagirmaz, sadece bunu okur.
+GUN_OZETI_KEY = "htp:gun_ozeti"
 
 SINIF_ESIK_LISTESI = ["cok_onemli", "onemli", "bakmaya_deger"]
 
@@ -154,3 +157,46 @@ def son_siniflandirma_yukle() -> str | None:
 
 def son_siniflandirma_kaydet(iso_zaman: str) -> None:
     _set_ham(SON_SINIFLANDIRMA_KEY, iso_zaman)
+
+
+def gun_ozeti_yukle() -> dict | None:
+    """Son hazir gun ozetini dondurur; hic uretilmemisse None."""
+    ozet = _get_json(GUN_OZETI_KEY, None)
+    return ozet if isinstance(ozet, dict) else None
+
+
+def gun_ozeti_kaydet(ozet: dict) -> None:
+    _set_json(GUN_OZETI_KEY, ozet)
+
+
+def _pipeline(komutlar: list[list]) -> list[dict]:
+    """Upstash REST /pipeline: birden fazla Redis komutunu TEK istekte calistirir.
+    Her komut icin {"result": ...} ya da {"error": ...} iceren bir liste doner."""
+    if not yapilandirilmis_mi():
+        raise RuntimeError("Upstash Redis yapılandırılmamış (UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN eksik).")
+    resp = requests.post(f"{_BASE_URL}/pipeline", headers=_basliklar(), json=komutlar, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def istek_siniri_asildi_mi(anahtar: str, azami_istek: int, pencere_sn: int) -> bool:
+    """Dagitik (tum sunucu ornekleri arasinda paylasilan) sabit pencereli istek
+    siniri: 'anahtar' icin sayaci INCR ile artirir; sayac ilk kez olustugunda
+    pencere_sn saniyelik EXPIRE baslatir. Sayac azami_istek'i asarsa True
+    doner (istek reddedilmeli).
+
+    EXPIRE ... NX, INCR ile ayni pipeline'da calisir ve yalnizca anahtarin
+    henuz bir omru yoksa uygulanir: bir onceki cagrida EXPIRE hic
+    calisamamis olsa bile (ör. ag kesintisi) sayac kalici olarak takili
+    kalip o kullaniciyi sonsuza dek engellemez, sonraki cagrida omur atanir."""
+    yanit = _pipeline([["INCR", anahtar], ["EXPIRE", anahtar, pencere_sn, "NX"]])
+    sayac = int(yanit[0]["result"])
+    if "error" in yanit[1]:
+        # Sunucu EXPIRE'in NX secenegini desteklemiyorsa (eski Redis surumu):
+        # yalnizca sayac ilk olustugunda klasik EXPIRE ile omur ata.
+        if sayac == 1:
+            resp = requests.post(
+                f"{_BASE_URL}/expire/{anahtar}/{pencere_sn}", headers=_basliklar(), timeout=10
+            )
+            resp.raise_for_status()
+    return sayac > azami_istek

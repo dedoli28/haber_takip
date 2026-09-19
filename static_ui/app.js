@@ -20,9 +20,24 @@ const KATEGORI_ETIKET = {
 };
 const KATEGORI_SIRA = ["ana", "hisse", "etf", "kripto", "pazar_nabzi", "blog"];
 const SINIF_ONEM_SIRA = { cok_onemli: 0, onemli: 1, bakmaya_deger: 2, onemsiz: 3 };
+const ULKE_ETIKET = { TR: "Türkiye", US: "ABD", DE: "Almanya", CN: "Çin" };
 
 /* ===================== Helpers ===================== */
 function $(id) { return document.getElementById(id); }
+
+// "ulke" alanı eklenmeden önce kaydedilmiş eski haberler (sunucudaki depoda
+// ve tarayıcıdaki Kaydedilenler'de) hep Finviz'den geldi, yani ABD'dir.
+function ulkeKodu(h) {
+  return h && h.ulke ? String(h.ulke).toUpperCase() : "US";
+}
+function ulkeEtiketi(kod) {
+  return ULKE_ETIKET[kod] || kod;
+}
+// CSS sınıfı yalnızca bilinen kodlardan üretilir (sunucu verisi sınıf adına
+// serbestçe karışmasın).
+function ulkeSinifi(kod) {
+  return ULKE_ETIKET[kod] ? `ulke-tag ulke-${kod}` : "ulke-tag ulke-diger";
+}
 
 function toast(mesaj, tur = "ok") {
   const el = document.createElement("div");
@@ -331,8 +346,20 @@ function detayGoster(h) {
   suankiOge = h;
   $("detailBadge").textContent = SINIF_ETIKET[h.sinif] || h.sinif;
   $("detailBadge").className = `badge badge-${h.sinif}`;
-  const katEtiket = h.kategori && KATEGORI_ETIKET[h.kategori] ? ` · ${KATEGORI_ETIKET[h.kategori]}` : "";
-  $("detailMeta").textContent = `${h.saat} · ${h.kaynak}${katEtiket}`;
+
+  const ulke = ulkeKodu(h);
+  $("detailUlke").textContent = ulkeEtiketi(ulke);
+  $("detailUlke").className = ulkeSinifi(ulke);
+
+  const katEl = $("detailKategori");
+  if (h.kategori && KATEGORI_ETIKET[h.kategori]) {
+    katEl.textContent = KATEGORI_ETIKET[h.kategori];
+    katEl.style.display = "";
+  } else {
+    katEl.style.display = "none";
+  }
+
+  $("detailMeta").textContent = `${h.saat} · ${h.kaynak}`;
   $("detailTitle").textContent = h.baslikTr || h.baslik;
 
   const origEl = $("detailOriginalTitle");
@@ -434,21 +461,45 @@ function gunOzetiModalBaslat() {
   });
 }
 
+// Modal gövdesine tek bir mesaj yazar. Sunucudan gelen hata metinleri de
+// buradan geçer: textContent kullanıldığı için HTML olarak yorumlanmaz (XSS).
+function gunOzetiMesajGoster(metin) {
+  const govde = $("daySummaryBody");
+  govde.textContent = "";
+  const p = document.createElement("p");
+  p.className = "detail-summary";
+  p.textContent = metin;
+  govde.appendChild(p);
+  $("daySummaryFooter").textContent = "";
+}
+
+// "Günü Özetle": Gemini'yi çağırmaz; sunucunun Redis'te hazır tuttuğu son
+// özeti gösterir (üretimi arka planda /api/gun-ozeti-olustur cron'u yapar).
 async function gunuOzetle() {
-  $("daySummaryBody").innerHTML = '<p class="detail-summary">Hazırlanıyor...</p>';
+  gunOzetiMesajGoster("Yükleniyor...");
   $("daySummaryOverlay").classList.add("is-open");
 
   try {
     const resp = await fetch("/api/gun-ozeti", { method: "POST" });
-    const yanit = await resp.json();
-    if (!yanit.ok) {
-      $("daySummaryBody").innerHTML = `<p class="detail-summary">${yanit.hata || "Özet alınamadı."}</p>`;
-      toast(yanit.hata || "Özet alınamadı.", "error");
+    let yanit = null;
+    try {
+      yanit = await resp.json();
+    } catch (e) {
+      yanit = null; // JSON olmayan yanıt (ör. platform hata sayfası)
+    }
+
+    if (!yanit || !yanit.ok) {
+      const hazirDegil = resp.status === 503;
+      const mesaj =
+        (yanit && yanit.hata) ||
+        (hazirDegil ? "Günün özeti henüz hazırlanmadı. Lütfen daha sonra tekrar deneyin." : "Özet alınamadı.");
+      gunOzetiMesajGoster(mesaj);
+      toast(mesaj, hazirDegil ? "warn" : "error");
       return;
     }
 
     const govde = $("daySummaryBody");
-    govde.innerHTML = "";
+    govde.textContent = "";
 
     const kategoriler = [...(yanit.kategoriler || [])].sort(
       (a, b) => KATEGORI_SIRA.indexOf(a.kategori) - KATEGORI_SIRA.indexOf(b.kategori)
@@ -481,8 +532,16 @@ async function gunuOzetle() {
     genelOzet.className = "detail-summary";
     genelOzet.textContent = yanit.genelOzet || "";
     govde.appendChild(genelOzet);
+
+    // Özetin ne zaman hazırlandığı (kullanıcı ne kadar güncel olduğunu görsün).
+    const uretim = yanit.olusturulmaZamani ? new Date(yanit.olusturulmaZamani) : null;
+    let alt = uretim && !isNaN(uretim.getTime())
+      ? `Özet hazırlanma zamanı: ${uretim.toLocaleString("tr-TR")}`
+      : "Özet hazırlanma zamanı bilinmiyor.";
+    if (Number.isFinite(yanit.haberSayisi)) alt += ` · ${yanit.haberSayisi} habere dayanır`;
+    $("daySummaryFooter").textContent = alt;
   } catch (e) {
-    $("daySummaryBody").innerHTML = `<p class="detail-summary">Beklenmeyen hata: ${e}</p>`;
+    gunOzetiMesajGoster("Beklenmeyen hata: " + e);
   }
 }
 
@@ -512,6 +571,12 @@ function kartOlustur(h, index, tiklaninca) {
     katTag.textContent = KATEGORI_ETIKET[h.kategori];
     metaRow.appendChild(katTag);
   }
+
+  const ulke = ulkeKodu(h);
+  const ulkeTag = document.createElement("span");
+  ulkeTag.className = ulkeSinifi(ulke);
+  ulkeTag.textContent = ulkeEtiketi(ulke);
+  metaRow.appendChild(ulkeTag);
 
   const meta = document.createElement("span");
   meta.className = "meta-text";
@@ -570,6 +635,9 @@ function haberPaneliOlustur() {
   const kategori = cokluSecimGrubuBaslat(
     document.querySelectorAll("#haberKategoriChips .chip"), "kategori", () => { rozetGuncelle(); ciz(); }
   );
+  const ulke = cokluSecimGrubuBaslat(
+    document.querySelectorAll("#haberUlkeChips .chip"), "ulke", () => { rozetGuncelle(); ciz(); }
+  );
   const sinif = cokluSecimGrubuBaslat(
     document.querySelectorAll("#haberChips .chip"), "sinif", () => { rozetGuncelle(); ciz(); }
   );
@@ -583,7 +651,8 @@ function haberPaneliOlustur() {
 
   function rozetGuncelle() {
     const saatSeciliMi = saatBaslangic.value !== "" || saatBitis.value !== "";
-    const sayac = (tarih.durum.deger ? 1 : 0) + kategori.secili.size + sinif.secili.size + (saatSeciliMi ? 1 : 0);
+    const sayac =
+      (tarih.durum.deger ? 1 : 0) + kategori.secili.size + ulke.secili.size + sinif.secili.size + (saatSeciliMi ? 1 : 0);
     filtreRozetGuncelle("haberFiltreRozet", sayac);
   }
 
@@ -594,6 +663,7 @@ function haberPaneliOlustur() {
   $("haberFiltreTemizleBtn").addEventListener("click", () => {
     tarih.temizle();
     kategori.temizle();
+    ulke.temizle();
     sinif.temizle();
     saatBaslangic.value = "";
     saatBitis.value = "";
@@ -607,6 +677,7 @@ function haberPaneliOlustur() {
     let gorulen = state.tumOgeler;
     if (sinif.secili.size > 0) gorulen = gorulen.filter((h) => sinif.secili.has(h.sinif));
     if (kategori.secili.size > 0) gorulen = gorulen.filter((h) => kategori.secili.has(h.kategori));
+    if (ulke.secili.size > 0) gorulen = gorulen.filter((h) => ulke.secili.has(ulkeKodu(h)));
     if (tarih.durum.deger === "bugun") gorulen = gorulen.filter((h) => h.tarih === bugununTarihi());
     if (tarih.durum.deger === "dun") gorulen = gorulen.filter((h) => h.tarih === dununTarihi());
     if (saatBaslangic.value !== "" || saatBitis.value !== "") {
@@ -688,7 +759,7 @@ function haberPaneliOlustur() {
 
       if (yanit.sonTarama) {
         const t = new Date(yanit.sonTarama);
-        $("haberSonTarama").textContent = `Sistem arka planda otomatik olarak Finviz'i tarıyor. Son tarama: ${t.toLocaleString("tr-TR")}`;
+        $("haberSonTarama").textContent = `Sistem arka planda haber kaynaklarını (ABD, Türkiye, Almanya, Çin) otomatik olarak tarıyor. Son tarama: ${t.toLocaleString("tr-TR")}`;
       }
     } catch (e) {
       if (!sessiz) toast("Beklenmeyen hata: " + e, "error");
@@ -709,6 +780,9 @@ function kayitliPaneliOlustur() {
   const kategori = cokluSecimGrubuBaslat(
     document.querySelectorAll("#kayitliKategoriChips .chip"), "kategori", () => { rozetGuncelle(); ciz(); }
   );
+  const ulke = cokluSecimGrubuBaslat(
+    document.querySelectorAll("#kayitliUlkeChips .chip"), "ulke", () => { rozetGuncelle(); ciz(); }
+  );
   const sinif = cokluSecimGrubuBaslat(
     document.querySelectorAll("#kayitliChips .chip"), "sinif", () => { rozetGuncelle(); ciz(); }
   );
@@ -716,11 +790,12 @@ function kayitliPaneliOlustur() {
   filtrePopoverBaslat("kayitliFiltreBtn", "kayitliFiltrePopover");
 
   function rozetGuncelle() {
-    filtreRozetGuncelle("kayitliFiltreRozet", kategori.secili.size + sinif.secili.size);
+    filtreRozetGuncelle("kayitliFiltreRozet", kategori.secili.size + ulke.secili.size + sinif.secili.size);
   }
 
   $("kayitliFiltreTemizleBtn").addEventListener("click", () => {
     kategori.temizle();
+    ulke.temizle();
     sinif.temizle();
     rozetGuncelle();
     ciz();
@@ -736,6 +811,7 @@ function kayitliPaneliOlustur() {
     let gorulen = liste;
     if (sinif.secili.size > 0) gorulen = gorulen.filter((h) => sinif.secili.has(h.sinif));
     if (kategori.secili.size > 0) gorulen = gorulen.filter((h) => kategori.secili.has(h.kategori));
+    if (ulke.secili.size > 0) gorulen = gorulen.filter((h) => ulke.secili.has(ulkeKodu(h)));
     if (state.arama) {
       const q = state.arama.toLowerCase();
       gorulen = gorulen.filter(
