@@ -1,6 +1,8 @@
-"""Gemini API ile JSON tabanlı sınıflandırma/özetleme isteği. Vercel'de
-sunucu tarafında (api rotasında) çalışır; API anahtarı istemciden gelir,
-hiçbir yerde saklanmaz."""
+"""Gemini API ile JSON tabanlı sınıflandırma/özetleme isteği.
+
+Vercel'de sunucu tarafında çalışır; anahtar yalnızca sunucu ortam değişkeninden
+okunur ve tarayıcıya gönderilmez.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +16,14 @@ GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{mode
 SINIF_SIRA = ["cok_onemli", "onemli", "bakmaya_deger", "onemsiz"]
 
 
-def gemini_json_iste(prompt: str, response_schema: dict, api_key: str, model: str) -> dict:
+def gemini_json_iste(
+    prompt: str,
+    response_schema: dict,
+    api_key: str,
+    model: str,
+    timeout_saniye: int = 10,
+    deneme_sayisi: int = 2,
+) -> dict:
     body = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -35,9 +44,9 @@ def gemini_json_iste(prompt: str, response_schema: dict, api_key: str, model: st
     # icin birakilir.
     GECICI_HATA_KODLARI = {500, 502, 503, 504}
 
-    for deneme in range(2):
+    for deneme in range(max(1, deneme_sayisi)):
         try:
-            resp = requests.post(url, params={"key": api_key}, json=body, timeout=10)
+            resp = requests.post(url, params={"key": api_key}, json=body, timeout=timeout_saniye)
         except Exception as e:  # noqa: BLE001
             son_hata = e
             time.sleep(1 * (deneme + 1))
@@ -75,21 +84,24 @@ def gemini_json_iste(prompt: str, response_schema: dict, api_key: str, model: st
 def siniflandirma_prompt_olustur(ogeler: list[dict]) -> str:
     girdi_listesi = []
     for o in ogeler:
-        satir = f"id={o['id']} | saat={o.get('saat', '')} | baslik={o['baslik']}"
+        satir = (
+            f"id={o['id']} | ulke={o.get('ulke', 'US')} | saat={o.get('saat', '')} "
+            f"| baslik={o['baslik']}"
+        )
         kaynak_ozeti = o.get("kaynakOzeti", "")
         if kaynak_ozeti and kaynak_ozeti != o["baslik"]:
             satir += f" | kaynak_ozeti={kaynak_ozeti}"
         girdi_listesi.append(satir)
 
     return f"""Sen deneyimli bir borsa/finans analistisin ve iyi bir
-çevirmensin. Aşağıda finviz.com sitesinden çekilmiş, çoğu İngilizce olan
+çevirmensin. Aşağıda ABD, Türkiye, Almanya ve Çin kaynaklarından çekilmiş
 haber başlıklarının bir listesi var. Her haber için üç şey yap:
 
 1) Başlığı doğal, akıcı TÜRKÇE'ye çevir ("baslik_tr" alanı): kelimesi
 kelimesine değil, bir Türkçe haber başlığı gibi doğal dursun. Şirket/kişi
 adları ve ticker sembollerini olduğu gibi bırak.
 
-2) ABD ve küresel borsalar / piyasalar açısından taşıdığı ÖNEM DERECESİNE
+2) Haberin ilgili olduğu ülke ve küresel piyasalar açısından taşıdığı ÖNEM DERECESİNE
 göre aşağıdaki 4 sınıftan birine ata:
 - "cok_onemli": Piyasaları geniş çapta hareket ettirebilecek haberler
   (Fed/merkez bankası kararları, faiz, enflasyon/istihdam gibi kritik makro
@@ -154,7 +166,12 @@ def gun_ozeti_prompt_olustur(kategorili_ogeler: dict[str, list[dict]]) -> str:
         if not ogeler:
             continue
         etiket = KATEGORI_ETIKET.get(kategori, kategori)
-        satirlar = [f"  [{o.get('sinif', '')}] {o.get('baslik_tr') or o['baslik']} — {o.get('ozet', '')}" for o in ogeler]
+        satirlar = [
+            f"  [{o.get('sinif', '')}] [ülke={o.get('ulke', 'US')}] "
+            f"{o.get('baslikTr') or o.get('baslik_tr') or o['baslik']} — "
+            f"{o.get('ai_ozet') or o.get('ozet', '')}"
+            for o in ogeler
+        ]
         bolumler.append(f'Kategori anahtari: "{kategori}" ({etiket})\n' + "\n".join(satirlar))
 
     return f"""Sen deneyimli bir borsa/finans analistisin. Aşağıda bugünün

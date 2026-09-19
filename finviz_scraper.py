@@ -1,4 +1,11 @@
-"""Finviz haber/blog sayfalarini ceker. Sunucu tarafinda calisir.
+"""Finviz ve dusuk engellenme riskli RSS kaynaklarindan haber ceker.
+
+RSS tarafinda HTML kazima yapilmaz; kaynaklarin yayinladigi XML akislar
+kullanilir. Boylece sayfa yapisi degisikliklerinden ve gereksiz isteklerden
+daha az etkilenilir. Ek kaynaklar:
+  - Turkiye: Investing.com BIST ve sirket haberleri
+  - Almanya: wallstreetONLINE ve Tagesschau ekonomi
+  - Cin: Google News uzerinden Cin ekonomi/borsa aramasi
 
 Finviz'in birden fazla haber kategorisi var (Piyasa, Hisse, ETF, Kripto,
 Pazar Nabzi) ve her biri ayri bir URL'de (?v=N). Kategoriye gore saat
@@ -18,16 +25,55 @@ fiyat degisimi) iliskilendirilmis. Bu yuzden ayri bir ayristirici kullanir;
 from __future__ import annotations
 
 import concurrent.futures
+import html
 import re
 from datetime import date, datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
+import xml.etree.ElementTree as ET
 
 import requests
 from bs4 import BeautifulSoup
 
 FINVIZ_URL = "https://finviz.com/news.ashx"
 FINVIZ_BASE = "https://finviz.com"
+
+# RSS/XML akislarinin kullanilmasi HTML kazimaya gore engellenme riskini
+# azaltir. Yine de cron araligini 10 dakikanin altina indirmemek onerilir.
+RSS_KAYNAKLARI = {
+    "tr_investing_bist": {
+        "url": "https://tr.investing.com/rss/news_1067.rss",
+        "kategori": "hisse",
+        "ulke": "TR",
+    },
+    "tr_sozcu_borsa": {
+        "url": "https://www.sozcu.com.tr/feeds-rss-category-borsa",
+        "kategori": "hisse",
+        "ulke": "TR",
+    },
+    "de_wallstreet_online": {
+        "url": "https://www.wallstreet-online.de/rss/nachrichten",
+        "kategori": "ana",
+        "ulke": "DE",
+    },
+    "de_tagesschau_wirtschaft": {
+        "url": "https://www.tagesschau.de/wirtschaft/index~rss2.xml",
+        "kategori": "ana",
+        "ulke": "DE",
+    },
+    "cn_google_news_ekonomi": {
+        "url": (
+            "https://news.google.com/rss/search?"
+            "q=%28China%20economy%20OR%20Chinese%20stocks%20OR%20Shanghai%20Composite%29%20when%3A2d"
+            "&hl=en-US&gl=US&ceid=US%3Aen"
+        ),
+        "kategori": "ana",
+        "ulke": "CN",
+    },
+}
+
+RSS_KAYNAK_BASINA_AZAMI = 30
 
 KATEGORI_V_PARAM = {
     "ana": None,
@@ -52,6 +98,106 @@ _HEADERS = {
     ),
     "Accept-Language": "en-US,en;q=0.9",
 }
+
+_RSS_HEADERS = {
+    "User-Agent": "HaberTakip/1.0 (+https://haber-takip-nper.vercel.app/)",
+    "Accept": "application/rss+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8",
+    "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.7,de;q=0.6",
+}
+
+
+def _xml_metni(eleman, etiket: str) -> str:
+    """RSS/Atom ad alanlarindan etkilenmeden ilk eslesen alt eleman metni."""
+    for alt in eleman.iter():
+        if alt.tag.rsplit("}", 1)[-1].lower() == etiket.lower():
+            return (alt.text or "").strip()
+    return ""
+
+
+def _rss_aciklamasini_temizle(metin: str) -> str:
+    """RSS aciklamasindaki HTML'i duz metne cevirip makul boyutta tutar."""
+    if not metin:
+        return ""
+    temiz = BeautifulSoup(html.unescape(metin), "html.parser").get_text(" ", strip=True)
+    temiz = re.sub(r"\s+", " ", temiz).strip()
+    return temiz[:1200]
+
+
+def _rss_zamanini_ayristir(metin: str) -> datetime | None:
+    if not metin:
+        return None
+    try:
+        zaman = parsedate_to_datetime(metin)
+    except (TypeError, ValueError, OverflowError):
+        try:
+            zaman = datetime.fromisoformat(metin.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if zaman.tzinfo is None:
+        zaman = zaman.replace(tzinfo=timezone.utc)
+    return zaman.astimezone(timezone.utc)
+
+
+def rss_haberlerini_cek(kaynak_adi: str) -> list[dict]:
+    """Yapilandirilmis bir RSS/Atom akisindaki en yeni haberleri dondurur."""
+    ayar = RSS_KAYNAKLARI[kaynak_adi]
+    resp = requests.get(ayar["url"], headers=_RSS_HEADERS, timeout=20)
+    resp.raise_for_status()
+
+    try:
+        kok = ET.fromstring(resp.content)
+    except ET.ParseError as e:
+        raise RuntimeError("gecersiz RSS/XML yaniti") from e
+
+    kayitlar = [e for e in kok.iter() if e.tag.rsplit("}", 1)[-1].lower() in {"item", "entry"}]
+    haberler: list[dict] = []
+    gorulen_url: set[str] = set()
+
+    for kayit in kayitlar:
+        baslik = _xml_metni(kayit, "title")
+        url = _xml_metni(kayit, "link")
+        if not url:
+            for alt in kayit.iter():
+                if alt.tag.rsplit("}", 1)[-1].lower() == "link" and alt.get("href"):
+                    url = alt.get("href", "").strip()
+                    break
+        if not baslik or not url or url in gorulen_url:
+            continue
+        gorulen_url.add(url)
+
+        tarih_metni = (
+            _xml_metni(kayit, "pubDate")
+            or _xml_metni(kayit, "published")
+            or _xml_metni(kayit, "updated")
+        )
+        zaman_utc = _rss_zamanini_ayristir(tarih_metni)
+        kullanilan_zaman = zaman_utc or datetime.now(timezone.utc)
+        aciklama = _xml_metni(kayit, "description") or _xml_metni(kayit, "summary")
+        kaynak = _xml_metni(kayit, "source")
+        if not kaynak:
+            try:
+                kaynak = urlparse(url).netloc.replace("www.", "")
+            except Exception:
+                kaynak = kaynak_adi
+
+        haberler.append(
+            {
+                "id": f"{kaynak_adi}-{len(haberler)}",
+                "saat": kullanilan_zaman.strftime("%H:%M"),
+                "tarih": kullanilan_zaman.date().isoformat(),
+                "zamanUtc": kullanilan_zaman.isoformat(timespec="milliseconds"),
+                "baslik": baslik,
+                "url": url,
+                "kaynak": kaynak,
+                "kaynakOzeti": _rss_aciklamasini_temizle(aciklama),
+                "kategori": ayar["kategori"],
+                "ulke": ayar["ulke"],
+            }
+        )
+        if len(haberler) >= RSS_KAYNAK_BASINA_AZAMI:
+            break
+
+    return haberler
 
 
 def _satir_tarihini_belirle(saat_metni: str, bugun: date) -> date:
@@ -240,9 +386,9 @@ def _ana_ve_blog_cek() -> dict[str, list[dict]]:
 
 
 def tum_turleri_cek() -> tuple[list[dict], list[str]]:
-    """Tum haber kategorilerini + bloglari PARALEL olarak ceker (Vercel/
-    cron-job.org zaman asimini asmamak icin - 5 istegi sirayla degil ayni
-    anda atar), her ogeye 'kategori' alanini ekler, URL'e gore tekillestirir.
+    """Finviz kategorilerini ve RSS kaynaklarini PARALEL olarak ceker.
+
+    Her ogeye kategori/ulke alani ekler ve URL'e gore tekillestirir.
     (haberler, hatalar) tuple'i dondurur - bir kategori basarisiz olursa
     digerlerine devam eder."""
     birlesik: list[dict] = []
@@ -257,8 +403,9 @@ def tum_turleri_cek() -> tuple[list[dict], list[str]]:
         "kripto": lambda: finviz_haberlerini_cek("kripto"),
         "pazar_nabzi": lambda: finviz_haberlerini_cek("pazar_nabzi"),
     }
+    gorevler.update({f"rss:{ad}": lambda ad=ad: rss_haberlerini_cek(ad) for ad in RSS_KAYNAKLARI})
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(gorevler)) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(gorevler))) as executor:
         gelecek_ad = {executor.submit(fn): ad for ad, fn in gorevler.items()}
         for gelecek in concurrent.futures.as_completed(gelecek_ad):
             ad = gelecek_ad[gelecek]
@@ -268,16 +415,21 @@ def tum_turleri_cek() -> tuple[list[dict], list[str]]:
                 hatalar.append(f"{'ana/blog' if ad == 'ana_blog' else ad}: {e}")
                 continue
             if ad == "ana_blog":
-                sonuclar.update(sonuc)
+                for kategori, ogeler in sonuc.items():
+                    sonuclar.setdefault(kategori, []).extend(ogeler)
+            elif ad.startswith("rss:"):
+                for oge in sonuc:
+                    sonuclar.setdefault(oge.get("kategori", "ana"), []).append(oge)
             else:
-                sonuclar[ad] = sonuc
+                sonuclar.setdefault(ad, []).extend(sonuc)
 
     for kategori in TUM_TURLER:
         for o in sonuclar.get(kategori, []):
             if o["url"] in gorulen:
                 continue
             gorulen.add(o["url"])
-            o["kategori"] = kategori
+            o.setdefault("kategori", kategori)
+            o.setdefault("ulke", "US")
             birlesik.append(o)
 
     return birlesik, hatalar
