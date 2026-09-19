@@ -27,9 +27,6 @@ SON_HATALAR_KEY = "htp:son_hatalar"
 SON_GONDERIM_KEY = "htp:son_gonderim"
 BEKLEYEN_SINIFLANDIRMA_KEY = "htp:bekleyen_siniflandirma"
 SON_SINIFLANDIRMA_KEY = "htp:son_siniflandirma"
-# Onceden uretilmis "Gunun Ozeti": {kategoriler, genelOzet, olusturulmaZamani,
-# haberSayisi}. "Gunu Ozetle" butonu Gemini'yi cagirmaz, sadece bunu okur.
-GUN_OZETI_KEY = "htp:gun_ozeti"
 
 SINIF_ESIK_LISTESI = ["cok_onemli", "onemli", "bakmaya_deger"]
 
@@ -159,16 +156,6 @@ def son_siniflandirma_kaydet(iso_zaman: str) -> None:
     _set_ham(SON_SINIFLANDIRMA_KEY, iso_zaman)
 
 
-def gun_ozeti_yukle() -> dict | None:
-    """Son hazir gun ozetini dondurur; hic uretilmemisse None."""
-    ozet = _get_json(GUN_OZETI_KEY, None)
-    return ozet if isinstance(ozet, dict) else None
-
-
-def gun_ozeti_kaydet(ozet: dict) -> None:
-    _set_json(GUN_OZETI_KEY, ozet)
-
-
 def _pipeline(komutlar: list[list]) -> list[dict]:
     """Upstash REST /pipeline: birden fazla Redis komutunu TEK istekte calistirir.
     Her komut icin {"result": ...} ya da {"error": ...} iceren bir liste doner."""
@@ -177,6 +164,11 @@ def _pipeline(komutlar: list[list]) -> list[dict]:
     resp = requests.post(f"{_BASE_URL}/pipeline", headers=_basliklar(), json=komutlar, timeout=10)
     resp.raise_for_status()
     return resp.json()
+
+
+def komut_calistir(komutlar: list[list]) -> list[dict]:
+    """Ham Redis komutlarini TEK istekte calistirir (gun ozeti gibi moduller icin)."""
+    return _pipeline(komutlar)
 
 
 def istek_siniri_asildi_mi(anahtar: str, azami_istek: int, pencere_sn: int) -> bool:

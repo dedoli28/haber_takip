@@ -429,12 +429,6 @@ html[data-theme="light"] .skeleton-card::after {
 .detail-actions .btn { flex: 1; justify-content: center; }
 #detailKaydetBtn.is-saved { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
-/* ===================== Credit ===================== */
-.credit-watermark {
-  text-align: center; font-style: italic; font-size: 11px; color: var(--text-faint);
-  padding: 6px 0 4px; user-select: none;
-}
-
 /* ===================== Toasts ===================== */
 .toast-stack {
   position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column;

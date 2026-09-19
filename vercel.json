@@ -4,5 +4,19 @@
     "app.py": {
       "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/gun-ozeti",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/gun-ozeti",
+      "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/cron/gun-ozeti",
+      "schedule": "0 15 * * *"
+    }
+  ]
 }

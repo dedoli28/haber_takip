@@ -659,6 +659,22 @@ function detayModalBaslat(kayitliPanelYenile) {
 }
 
 /* ===================== Gün özeti modal ===================== */
+// Modal her açıldığında artar; kapanan/eski bir modalın istek ve yoklama sonuçları yok sayılır.
+let ozetOturum = 0;
+const OZET_YOKLAMA_MS = 4000;
+const OZET_YOKLAMA_AZAMI = 16;
+const OZET_HATA_METNI = {
+  anahtar_yok: "Özet servisi bu sunucuda yapılandırılmamış.",
+  haber_yok: "Bugün için özetlenecek haber henüz yok.",
+  gemini_kota: "Yapay zekâ servisinin günlük kullanım sınırına ulaşıldı.",
+  gemini_limit: "Yapay zekâ servisi geçici olarak istek sınırına ulaştı.",
+  gemini_zaman_asimi: "Özet oluşturulurken zaman aşımı oldu.",
+  gemini_yogun: "Yapay zekâ servisi şu anda yoğun.",
+  zaman_asimi: "Özet oluşturma beklenenden uzun sürdü.",
+  depo_hatasi: "Veri deposuna ulaşılamadı.",
+  bilinmeyen: "Özet oluşturulamadı.",
+};
+
 function gunOzetiModalBaslat() {
   modalBagla("daySummaryOverlay", "closeDaySummary");
 }
@@ -666,12 +682,12 @@ function gunOzetiModalBaslat() {
 function gunOzetiEylemleri(...butonlar) {
   const kutu = $("daySummaryActions");
   kutu.textContent = "";
-  butonlar.filter(Boolean).forEach((b) => kutu.appendChild(b));
-  kutu.hidden = butonlar.filter(Boolean).length === 0;
+  const liste = butonlar.filter(Boolean);
+  liste.forEach((b) => kutu.appendChild(b));
+  kutu.hidden = liste.length === 0;
 }
 
-// Modal gövdesine tek bir mesaj yazar. Sunucudan gelen hata metinleri de
-// buradan geçer: textContent kullanıldığı için HTML olarak yorumlanmaz (XSS).
+// Modal gövdesine tek bir mesaj yazar. Metinler textContent ile eklenir (XSS'e karşı).
 function gunOzetiMesajGoster(metin) {
   const govde = $("daySummaryBody");
   govde.textContent = "";
@@ -692,21 +708,56 @@ function sonBasariliOzeti() {
   }
 }
 
-function gunOzetiCiz(yanit, ekUyari) {
+function ozetIcerikVarMi(y) {
+  return !!(y && (y.genelOzet || (y.kategoriler && y.kategoriler.length)));
+}
+
+function ozetHataMetni(kod) {
+  return OZET_HATA_METNI[kod] || OZET_HATA_METNI.bilinmeyen;
+}
+
+function ozetTarihMetni(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  if (!m) return iso || "";
+  return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString("tr-TR", { day: "numeric", month: "long" });
+}
+
+// Sunucu yanıtından modalın üstünde gösterilecek durum notu (yoksa null).
+function ozetDurumNotu(y, yenileniyor) {
+  if (yenileniyor || y.durum === "generating") return { tur: "bilgi", metin: "Özet şu anda güncelleniyor…" };
+  if (y.durum === "failed") {
+    let m = `Özet güncellenemedi: ${ozetHataMetni(y.hataKodu)}`;
+    if (y.sonrakiDenemeSn) m += ` Yeni deneme yaklaşık ${Math.ceil(y.sonrakiDenemeSn / 60)} dk sonra mümkün.`;
+    else m += ` Sonraki otomatik güncelleme: ${y.sonrakiGuncelleme}.`;
+    return { tur: "uyari", metin: m };
+  }
+  if (y.gecmisGun && y.gosterilenTarih) {
+    return {
+      tur: "uyari",
+      metin: `Bugünün özeti henüz hazır değil; ${ozetTarihMetni(y.gosterilenTarih)} tarihli son özet gösteriliyor. Sonraki otomatik güncelleme: ${y.sonrakiGuncelleme}.`,
+    };
+  }
+  if (!y.guncelMi) {
+    return { tur: "bilgi", metin: `Bu özet son planlı güncellemeden önce hazırlandı. Sonraki otomatik güncelleme: ${y.sonrakiGuncelleme}.` };
+  }
+  return null;
+}
+
+function gunOzetiIcerikCiz(y, not) {
   const govde = $("daySummaryBody");
   govde.textContent = "";
 
-  if (ekUyari) {
+  if (not) {
     const u = document.createElement("p");
     u.className = "day-summary-uyari";
-    u.textContent = ekUyari;
+    u.setAttribute("role", "status");
+    u.textContent = not.metin;
     govde.appendChild(u);
   }
 
-  const kategoriler = [...(yanit.kategoriler || [])].sort(
+  const kategoriler = [...(y.kategoriler || [])].sort(
     (a, b) => KATEGORI_SIRA.indexOf(a.kategori) - KATEGORI_SIRA.indexOf(b.kategori)
   );
-
   kategoriler.forEach((k) => {
     const baslik = document.createElement("p");
     baslik.className = "modal-section-title";
@@ -732,87 +783,170 @@ function gunOzetiCiz(yanit, ekUyari) {
 
   const genelOzet = document.createElement("p");
   genelOzet.className = "detail-summary";
-  genelOzet.textContent = yanit.genelOzet || "";
+  genelOzet.textContent = y.genelOzet || "";
   govde.appendChild(genelOzet);
 
   // Özetin ne zaman hazırlandığı (kullanıcı ne kadar güncel olduğunu görsün).
-  const uretim = yanit.olusturulmaZamani ? new Date(yanit.olusturulmaZamani) : null;
+  const uretim = y.olusturulmaZamani ? new Date(y.olusturulmaZamani) : null;
   let alt = uretim && !isNaN(uretim.getTime())
     ? `Özet hazırlanma zamanı: ${uretim.toLocaleString("tr-TR")}`
     : "Özet hazırlanma zamanı bilinmiyor.";
-  if (Number.isFinite(yanit.haberSayisi)) alt += ` · ${yanit.haberSayisi} habere dayanır`;
-  $("daySummaryFooter").textContent = alt;
+  if (Number.isFinite(y.haberSayisi)) alt += ` · ${y.haberSayisi} habere dayanır`;
+  $("daySummaryFooter").textContent = alt + planliSaatMetni(y);
 }
 
-// "Günü Özetle": Gemini'yi çağırmaz; sunucunun Redis'te hazır tuttuğu son
-// özeti gösterir (üretimi arka planda /api/gun-ozeti-olustur cron'u yapar).
-async function gunOzetiYukle() {
-  const govde = $("daySummaryBody");
-  govde.setAttribute("aria-busy", "true");
-  gunOzetiMesajGoster("Yükleniyor...");
+function planliSaatMetni(y) {
+  return y && y.planliSaatler && y.planliSaatler.length
+    ? ` · Otomatik güncelleme: ${y.planliSaatler.join(", ")} (Türkiye saati)`
+    : "";
+}
 
-  try {
-    const ac = new AbortController();
-    const zaman = setTimeout(() => ac.abort(), 20000);
-    let resp;
-    try {
-      resp = await fetch("/api/gun-ozeti", { method: "POST", signal: ac.signal });
-    } finally {
-      clearTimeout(zaman);
-    }
-    let yanit = null;
-    try {
-      yanit = await resp.json();
-    } catch (e) {
-      yanit = null; // JSON olmayan yanıt (ör. platform hata sayfası)
-    }
+// Sunucu yanıtına göre modalı çizer; içerik yoksa duruma uygun açıklama + eylem gösterir.
+function gunOzetiGoster(y, yenileniyor = false) {
+  const not = ozetDurumNotu(y, yenileniyor);
+  if (ozetIcerikVarMi(y)) {
+    gunOzetiIcerikCiz(y, not);
+    if (y.durum === "failed") gunOzetiEylemleri(butonOlustur("Tekrar dene", "btn btn-primary btn-sm", gunOzetiYukle));
+    else gunOzetiEylemleri();
+    return;
+  }
 
-    if (!yanit || !yanit.ok) {
-      const hazirDegil = resp.status === 503;
-      const mesaj =
-        (yanit && yanit.hata) ||
-        (hazirDegil ? "Günün özeti henüz hazırlanmadı. Lütfen daha sonra tekrar deneyin." : "Özet alınamadı.");
-      gunOzetiHatasi(mesaj);
-      return;
-    }
-
-    depoYaz(SON_GUN_OZETI_KEY, JSON.stringify({ yanit, alindi: new Date().toISOString() }));
-    // Özet bugüne ait değilse kullanıcı bunu bilmeli.
-    let uyari = null;
-    const uretim = yanit.olusturulmaZamani ? new Date(yanit.olusturulmaZamani) : null;
-    if (uretim && !isNaN(uretim.getTime()) && yerelTarihIso(uretim) !== bugununTarihi()) {
-      uyari = `Bu özet bugüne ait değil (${uretim.toLocaleDateString("tr-TR")}). Bugünün özeti henüz hazırlanmamış olabilir.`;
-    }
-    gunOzetiCiz(yanit, uyari);
-    gunOzetiEylemleri(uyari ? butonOlustur("Yeniden kontrol et", "btn btn-outline btn-sm", gunOzetiYukle) : null);
-  } catch (e) {
-    const zamanAsimi = e && e.name === "AbortError";
-    gunOzetiHatasi(zamanAsimi ? "Sunucu zamanında yanıt vermedi." : "Bağlantı kurulamadı. İnternet bağlantınızı kontrol edin.");
-  } finally {
-    govde.setAttribute("aria-busy", "false");
+  let mesaj;
+  if (yenileniyor || y.durum === "generating") {
+    mesaj = "Bugünün özeti hazırlanıyor. Bu birkaç saniye sürebilir…";
+  } else if (y.durum === "failed") {
+    mesaj = `Bugünün özeti oluşturulamadı: ${ozetHataMetni(y.hataKodu)}`;
+    if (y.sonrakiDenemeSn) mesaj += ` Yeni deneme yaklaşık ${Math.ceil(y.sonrakiDenemeSn / 60)} dk sonra mümkün.`;
+  } else {
+    const saatler = (y.planliSaatler || []).join(", ");
+    mesaj = `Bugünün özeti henüz hazırlanmadı. Özet her gün ${saatler} saatlerinde (Türkiye saati) otomatik oluşturulur. Sonraki güncelleme: ${y.sonrakiGuncelleme}.`;
+  }
+  gunOzetiMesajGoster(mesaj);
+  $("daySummaryFooter").textContent = planliSaatMetni(y).replace(/^ · /, "");
+  if (!(yenileniyor || y.durum === "generating")) {
+    gunOzetiEylemleri(butonOlustur(y.durum === "failed" ? "Tekrar dene" : "Yeniden kontrol et", "btn btn-primary btn-sm", gunOzetiYukle));
   }
 }
 
-// Hata durumu: açıklama + "Tekrar dene" + (varsa) tarayıcıda saklı son başarılı özet.
-function gunOzetiHatasi(mesaj) {
-  // Mesaj modalın içinde zaten görünür; ayrıca toast göstermek alt paneldeki düğmelerin üstüne biner.
+async function ozetIstegi(yol, yontem, zamanAsimiMs) {
+  const ac = new AbortController();
+  const zaman = setTimeout(() => ac.abort(), zamanAsimiMs);
+  try {
+    const resp = await fetch(yol, { method: yontem, signal: ac.signal, headers: { Accept: "application/json" } });
+    let yanit = null;
+    try { yanit = await resp.json(); } catch (e) { yanit = null; } // JSON olmayan yanıt (ör. platform hata sayfası)
+    if (!resp.ok || !yanit || yanit.ok === false) {
+      const hata = new Error("http");
+      hata.durum = resp.status;
+      throw hata;
+    }
+    return yanit;
+  } finally {
+    clearTimeout(zaman);
+  }
+}
+
+// Ağ/sunucu hatası: açıklama + "Tekrar dene" + (varsa) tarayıcıda saklı son başarılı özet.
+function gunOzetiAgHatasi(e) {
+  const zamanAsimi = e && e.name === "AbortError";
+  const mesaj = zamanAsimi
+    ? "Sunucu zamanında yanıt vermedi."
+    : e && e.durum
+      ? "Günün özeti şu anda alınamıyor. Lütfen biraz sonra tekrar deneyin."
+      : "Bağlantı kurulamadı. İnternet bağlantınızı kontrol edin.";
   gunOzetiMesajGoster(mesaj);
   const son = sonBasariliOzeti();
   const butonlar = [butonOlustur("Tekrar dene", "btn btn-primary btn-sm", gunOzetiYukle)];
   if (son && son.yanit) {
     const zaman = son.alindi ? new Date(son.alindi) : null;
-    const etiket = zaman && !isNaN(zaman.getTime()) ? `Son başarılı özeti göster (${kisaZaman(zaman)})` : "Son başarılı özeti göster";
-    butonlar.push(butonOlustur(etiket, "btn btn-outline btn-sm", () => {
-      gunOzetiCiz(son.yanit, "Bu, daha önce başarıyla alınmış son özettir; güncel olmayabilir.");
+    const gecerli = zaman && !isNaN(zaman.getTime());
+    butonlar.push(butonOlustur(gecerli ? `Son başarılı özeti göster (${kisaZaman(zaman)})` : "Son başarılı özeti göster", "btn btn-outline btn-sm", () => {
+      gunOzetiIcerikCiz(son.yanit, { tur: "uyari", metin: "Bu, bu cihazda daha önce başarıyla alınmış son özettir; güncel olmayabilir." });
       gunOzetiEylemleri(butonOlustur("Yeniden dene", "btn btn-primary btn-sm", gunOzetiYukle));
     }));
-    if (zaman && !isNaN(zaman.getTime())) $("daySummaryFooter").textContent = `Son başarılı özet zamanı: ${zaman.toLocaleString("tr-TR")}`;
+    if (gecerli) $("daySummaryFooter").textContent = `Son başarılı özet zamanı: ${zaman.toLocaleString("tr-TR")}`;
   }
   gunOzetiEylemleri(...butonlar);
 }
 
+// Başka bir istek/cron özeti üretirken durumu kısa aralıklarla yoklar.
+function gunOzetiYokla(oturum, deneme) {
+  setTimeout(async () => {
+    if (oturum !== ozetOturum) return;
+    try {
+      const y = await ozetIstegi("/api/gun-ozeti", "GET", 15000);
+      if (oturum !== ozetOturum) return;
+      if (y.durum === "generating" && deneme + 1 < OZET_YOKLAMA_AZAMI) {
+        gunOzetiGoster(y);
+        gunOzetiYokla(oturum, deneme + 1);
+        return;
+      }
+      if (y.durum === "generating") {
+        gunOzetiGoster({ ...y, durum: "missing" });
+        toast("Özet hâlâ hazırlanıyor; biraz sonra tekrar deneyin.", "warn");
+        return;
+      }
+      gunOzetiSonuc(y);
+    } catch (e) {
+      if (oturum === ozetOturum && deneme + 1 < OZET_YOKLAMA_AZAMI) gunOzetiYokla(oturum, deneme + 1);
+    }
+  }, OZET_YOKLAMA_MS);
+}
+
+function gunOzetiSonuc(y) {
+  gunOzetiGoster(y);
+  if (ozetIcerikVarMi(y)) depoYaz(SON_GUN_OZETI_KEY, JSON.stringify({ yanit: y, alindi: new Date().toISOString() }));
+}
+
+// Özet planlı saate göre bayatsa sunucudan KONTROLLÜ yenileme ister (Gemini çağrısı sunucuda,
+// kilit + bekleme kurallarıyla sınırlıdır); bu sırada mevcut özet gösterilmeye devam eder.
+async function gunOzetiYenile(oturum, onceki) {
+  gunOzetiGoster(onceki, true);
+  try {
+    const y = await ozetIstegi("/api/gun-ozeti/yenile", "POST", 45000);
+    if (oturum !== ozetOturum) return;
+    if (y.durum === "generating") {
+      gunOzetiGoster(y);
+      gunOzetiYokla(oturum, 0);
+      return;
+    }
+    gunOzetiSonuc(y);
+  } catch (e) {
+    if (oturum !== ozetOturum) return;
+    gunOzetiGoster(onceki);
+    toast("Özet güncellemesi başlatılamadı. Mevcut özet gösteriliyor.", "warn");
+  }
+}
+
+// "Günü Özetle": modal açıldığında hazır özeti okur. Gemini'yi yalnızca sunucu,
+// planlı saatlerde (10:00/14:00/18:00) ya da kontrollü yenilemede çağırır.
+async function gunOzetiYukle() {
+  const oturum = ++ozetOturum;
+  const govde = $("daySummaryBody");
+  govde.setAttribute("aria-busy", "true");
+  gunOzetiMesajGoster("Yükleniyor...");
+  try {
+    const y = await ozetIstegi("/api/gun-ozeti", "GET", 20000);
+    if (oturum !== ozetOturum) return;
+    gunOzetiSonuc(y);
+    if (y.yenilemeGerekli) {
+      await gunOzetiYenile(oturum, y);
+    } else if (y.durum === "generating") {
+      gunOzetiYokla(oturum, 0);
+    }
+  } catch (e) {
+    if (oturum === ozetOturum) gunOzetiAgHatasi(e);
+  } finally {
+    if (oturum === ozetOturum) govde.setAttribute("aria-busy", "false");
+  }
+}
+
 function gunuOzetle(tetikleyici) {
-  modalAc("daySummaryOverlay", { tetikleyici, ilkOdak: "closeDaySummary" });
+  modalAc("daySummaryOverlay", {
+    tetikleyici,
+    ilkOdak: "closeDaySummary",
+    kapaninca: () => { ozetOturum++; },
+  });
   gunOzetiYukle();
 }
 

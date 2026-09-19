@@ -29,11 +29,15 @@ Mimari:
     (90 dk) bir esik e-postasi gider.
   - /api/sabah-ozeti: HARICI bir cron gorevi tarafindan her sabah 06:00'da
     cagrilir; gece boyunca biriken cok_onemli haberleri toplu gonderir.
-  - /api/gun-ozeti-olustur: HARICI cron gorevi tarafindan gunde 1-4 kez
-    cagrilir; bugunun en yeni haberlerinden (kategori basina en fazla 8,
-    ulkeler arasinda dengeli) Gemini ile TEK bir gun ozeti uretip Redis'e
-    kaydeder. /api/gun-ozeti ("Gunu Ozetle" butonu) Gemini'yi HIC cagirmaz,
-    yalnizca Redis'teki bu hazir ozeti dondurur.
+  - Gun ozeti (gun_ozeti_servisi.py): Istanbul saatiyle 10:00/14:00/18:00'de
+    uretilir. Vercel Cron (vercel.json, UTC 07/11/15) GET /api/cron/gun-ozeti'ni
+    CRON_SECRET (Authorization: Bearer) ile cagirir; bugunun en yeni haberlerinden
+    (kategori basina en fazla 8, ulkeler arasinda dengeli) Gemini ile TEK ozet
+    uretilip tarih anahtarli kayda (htp:gun_ozeti:v2:<tarih>, durum ready|
+    generating|failed) yazilir. GET /api/gun-ozeti ("Gunu Ozetle" modali) Gemini'yi
+    HIC cagirmaz, kaydi okur; ozet bayatsa POST /api/gun-ozeti/yenile kontrollu
+    (kilit + 15 dk bekleme) yenileme baslatir. /api/gun-ozeti-olustur harici cron
+    servisi icin ayni mantigi X-Poll-Secret ile sunar.
   - /api/gun-sonu: HARICI bir cron gorevi tarafindan gunde bir kez (ör.
     23:59) cagrilir; her aliciya gunun ozetini (Redis'te bugune ait hazir
     ozet varsa onu, yoksa BIR kez uretip Redis'e kaydederek) + esige hic
@@ -66,6 +70,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import email_client
+import gun_ozeti_servisi
 import market_data_service
 import market_symbols
 import redis_store
@@ -567,55 +572,113 @@ def _gun_ozeti_uret(depo: dict, api_key: str) -> dict | None:
     }
 
 
-@app.post("/api/gun-ozeti")
-def gun_ozeti():
-    """'Gunu Ozetle' butonu: Gemini'yi CAGIRMAZ, yalnizca Redis'teki son hazir
-    ozeti dondurur (uretimi /api/gun-ozeti-olustur yapar)."""
-    try:
-        ozet = redis_store.gun_ozeti_yukle()
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+def _gun_ozeti_uretici(depo: dict | None = None) -> dict:
+    """Gun ozeti servisinin uretim fonksiyonu: Gemini ile BIR kez ozet uretir.
+    Hata kodlari istemciye gitmez (yalnizca kaydedilir): anahtar_yok, depo_hatasi,
+    haber_yok ya da Gemini hatasindan turetilen kod."""
+    api_key = _gemini_anahtari()
+    if not api_key:
+        raise gun_ozeti_servisi.OzetHatasi("anahtar_yok")
+    if depo is None:
+        try:
+            depo = redis_store.depo_yukle()
+        except Exception as e:  # noqa: BLE001
+            raise gun_ozeti_servisi.OzetHatasi("depo_hatasi") from e
+    ozet = _gun_ozeti_uret(depo, api_key)
+    if ozet is None:
+        raise gun_ozeti_servisi.OzetHatasi("haber_yok")
+    return {"kategoriler": ozet["kategoriler"], "genelOzet": ozet["genelOzet"], "haberSayisi": ozet["haberSayisi"]}
 
-    if not ozet:
-        return JSONResponse(
-            {
-                "ok": False,
-                "hata": "Günün özeti henüz hazırlanmadı. Özet gün içinde birkaç kez otomatik "
-                "olarak oluşturulur; lütfen daha sonra tekrar deneyin.",
-            },
-            status_code=503,
+
+def _ozet_depo_hatasi() -> JSONResponse:
+    return JSONResponse(
+        {"ok": False, "kod": "depo_hatasi", "hata": "Günün özeti şu anda alınamıyor."},
+        status_code=503,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+def _ozet_yaniti(icerik: dict) -> JSONResponse:
+    return JSONResponse(icerik, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/gun-ozeti")
+@app.post("/api/gun-ozeti")  # eski istemciler POST kullaniyordu
+def gun_ozeti():
+    """'Gunu Ozetle' modalinin okudugu uc: Gemini'yi CAGIRMAZ. Bugunun kaydini
+    (durum: ready|generating|failed|missing) ve varsa icerigi dondurur; bugun
+    icerik yoksa son basarili ozeti (onceki gun) 'gecmisGun' isaretiyle verir.
+    Uretim cron ile (10:00/14:00/18:00 Istanbul) ya da kontrollu yenilemeyle olur."""
+    try:
+        return _ozet_yaniti(gun_ozeti_servisi.oku(uretilebilir=bool(_gemini_anahtari())))
+    except Exception:  # noqa: BLE001 - ayrinti istemciye gonderilmez
+        return _ozet_depo_hatasi()
+
+
+@app.post("/api/gun-ozeti/yenile")
+def gun_ozeti_yenile():
+    """Kullanici kaynakli KONTROLLU yenileme: yalnizca ozet planli saate gore bayatsa,
+    uretim devam etmiyorsa ve son denemeden 15 dk gectiyse Gemini'ye gider (tek
+    seferde tek istek: Redis kilidi). Diger durumlarda neden bilgisiyle doner."""
+    try:
+        s = gun_ozeti_servisi.kullanici_yenilemesi(_gun_ozeti_uretici, uretilebilir=bool(_gemini_anahtari()))
+    except Exception:  # noqa: BLE001
+        return _ozet_depo_hatasi()
+    return _ozet_yaniti({**s["durum"], "sonuc": s["sonuc"]})
+
+
+def _cron_dogrula(request: Request) -> bool:
+    """Vercel Cron, CRON_SECRET tanimliysa 'Authorization: Bearer <CRON_SECRET>' basligini
+    kendisi ekler. Harici cron servisleri (cron-job.org) icin mevcut X-Poll-Secret de
+    kabul edilir. Ikisi de tanimsizsa hicbir istek yetkili sayilmaz."""
+    beklenen = os.environ.get("CRON_SECRET", "")
+    if beklenen:
+        gelen = request.headers.get("authorization", "")
+        if hmac.compare_digest(gelen.encode("utf-8"), f"Bearer {beklenen}".encode("utf-8")):
+            return True
+    return _poll_secret_dogrula(request)
+
+
+def _ozet_cron_calistir() -> JSONResponse:
+    try:
+        s = gun_ozeti_servisi.uret(
+            _gun_ozeti_uretici, kaynak="cron", min_aralik_sn=gun_ozeti_servisi.CRON_MIN_ARALIK_SN
         )
-    return {"ok": True, **ozet}
+    except Exception:  # noqa: BLE001
+        return _ozet_depo_hatasi()
+    kayit = s["kayit"] or {}
+    basarisiz = s["sonuc"] == "failed"
+    return JSONResponse(
+        {
+            "ok": not basarisiz,
+            "sonuc": s["sonuc"],
+            "tarih": kayit.get("tarih"),
+            "haberSayisi": kayit.get("haberSayisi"),
+            "hataKodu": s["hataKodu"],
+        },
+        status_code=502 if basarisiz else 200,  # Vercel cron gunlugunde basarisiz gorunsun
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/api/cron/gun-ozeti")
+def cron_gun_ozeti(request: Request):
+    """Vercel Cron (vercel.json: 07:00/11:00/15:00 UTC = 10:00/14:00/18:00 Istanbul)
+    tarafindan GET ile cagrilir. Kopya teslime karsi (Vercel ayni calismayi
+    nadiren iki kez teslim edebilir) son 60 dk icinde uretilmis ozet varsa atlar;
+    eszamanli tek Gemini istegi Redis kilidiyle saglanir."""
+    if not _cron_dogrula(request):
+        return _yetkisiz()
+    return _ozet_cron_calistir()
 
 
 @app.post("/api/gun-ozeti-olustur")
 def gun_ozeti_olustur(request: Request):
-    """Harici cron gorevi tarafindan gunde 1-4 kez cagrilir (X-Poll-Secret ile
-    korunur): ozeti Gemini ile BIR kez uretip Redis'e kaydeder."""
+    """Harici cron servisi (cron-job.org) icin: cron ucuyla ayni mantik, POST +
+    X-Poll-Secret (POLL_SECRET) ile korunur."""
     if not _poll_secret_dogrula(request):
         return _yetkisiz()
-
-    api_key = _gemini_anahtari()
-    if not api_key:
-        return JSONResponse({"ok": False, "hata": "Sunucuda GEMINI_API_KEY tanımlı değil."}, status_code=500)
-
-    try:
-        depo = redis_store.depo_yukle()
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
-
-    try:
-        ozet = _gun_ozeti_uret(depo, api_key)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
-    if ozet is None:
-        return JSONResponse({"ok": False, "hata": "Bugün için özetlenecek haber yok."}, status_code=400)
-
-    try:
-        redis_store.gun_ozeti_kaydet(ozet)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
-    return {"ok": True, **ozet}
+    return _ozet_cron_calistir()
 
 
 def _siniflandir_grup(grup: list[dict], api_key: str) -> str | None:
@@ -1295,46 +1358,28 @@ def basarisiz_siniflandirmalari_temizle(request: Request):
     return {"ok": True, "silinenSayisi": silinen, "kalanSayisi": len(depo)}
 
 
-def _ozet_bugunun_mu(ozet: dict | None) -> bool:
-    """Ozet, Istanbul takvimine gore BUGUN uretilmis mi? (Dunun ozeti gun sonu
-    e-postasinda 'gunun ozeti' diye gonderilmesin.)"""
-    if not ozet:
-        return False
-    try:
-        uretim_gunu = datetime.fromisoformat(ozet["olusturulmaZamani"]).astimezone(ISTANBUL_TZ).date()
-    except (KeyError, ValueError, TypeError):
-        return False
-    return uretim_gunu == _istanbul_saati().date()
-
-
 def _gun_sonu_ozetini_hazirla(depo: dict) -> dict:
-    """Gun sonu e-postasinin ozeti: Redis'te BUGUN uretilmis hazir ozet varsa
-    onu kullanir (Gemini cagrilmaz); yoksa BIR kez uretip Redis'e kaydeder.
-    Bir hata olursa e-postanin gitmesini engellemez, hata metnini ozetin yerine
-    koyar."""
+    """Gun sonu e-postasinin ozeti: bugune ait icerikli bir ozet varsa (planli
+    saatlerde uretilmis) onu kullanir, Gemini cagrilmaz; yoksa BIR kez uretip kaydeder.
+    Hata e-postanin gitmesini engellemez; ozetin yerine genel bir not konur."""
     bos = {"kategoriler": [], "genelOzet": ""}
     try:
-        hazir = redis_store.gun_ozeti_yukle()
-    except Exception as e:  # noqa: BLE001
-        return {**bos, "genelOzet": f"Gün özeti alınamadı: {e}"}
-    if _ozet_bugunun_mu(hazir):
+        hazir = gun_ozeti_servisi.bugunun_hazir_ozeti()
+    except Exception:  # noqa: BLE001
+        return {**bos, "genelOzet": "Gün özeti şu anda alınamadı."}
+    if hazir:
         return hazir
 
-    api_key = _gemini_anahtari()
-    if not api_key:
-        return {**bos, "genelOzet": "Gün özeti oluşturulamadı: Sunucuda GEMINI_API_KEY tanımlı değil."}
     try:
-        ozet = _gun_ozeti_uret(depo, api_key)
-    except Exception as e:  # noqa: BLE001
-        return {**bos, "genelOzet": f"Gün özeti oluşturulamadı: {e}"}
-    if ozet is None:
-        return bos
-
-    try:
-        redis_store.gun_ozeti_kaydet(ozet)
+        sonuc = gun_ozeti_servisi.uret(lambda: _gun_ozeti_uretici(depo), kaynak="gun-sonu")
     except Exception:  # noqa: BLE001
-        pass  # ozet yine de e-postaya girer; kaydedilememesi gonderimi engellemez
-    return ozet
+        return {**bos, "genelOzet": "Gün özeti şu anda alınamadı."}
+    kayit = sonuc["kayit"] or {}
+    if sonuc["sonuc"] in ("ready", "atlandi") and (kayit.get("genelOzet") or kayit.get("kategoriler")):
+        return kayit
+    if sonuc["hataKodu"] == "haber_yok":
+        return bos
+    return {**bos, "genelOzet": "Gün özeti oluşturulamadı."}
 
 
 @app.post("/api/gun-sonu")

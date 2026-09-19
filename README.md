@@ -48,28 +48,50 @@ Tarama üç bağımsız adımdır ve her biri kendi cron'undan tetiklenir:
 2. `POST /api/haber-siniflandir` — kuyruktan bir grup haberi (ülkeler/kategoriler
    arasında dengeli seçerek) Gemini ile sınıflandırır, Türkçeye çevirir,
    özetler ve depoya yazar; eşik e-postalarını tetikler.
-3. `POST /api/gun-ozeti-olustur` — günün özetini Gemini ile **bir kez** üretip
+3. `GET /api/cron/gun-ozeti` (Vercel Cron, günde 3 kez) — günün özetini Gemini ile **bir kez** üretip
    Redis'e kaydeder (aşağıya bakın).
 
 `POST /api/tara` ilk ikisini sırayla çağıran bir kısayoldur (manuel test için).
 
-### Gün özeti ve Gemini kotası
+### Gün özeti (10:00 / 14:00 / 18:00) ve Gemini kotası
 
-"Günü Özetle" butonu **Gemini'yi çağırmaz**; `POST /api/gun-ozeti` yalnızca
-Redis'teki son hazır özeti döndürür (hazır özet yoksa `503`). Yani buton her
-tıklamada Gemini kotası tüketmez.
+Özet **Türkiye saatiyle 10:00, 14:00 ve 18:00**'de otomatik üretilir ve Redis'te
+**tarih anahtarlı** saklanır: `htp:gun_ozeti:v2:<YYYY-MM-DD>` (14 gün TTL). Kayıt
+`durum` (`ready` / `generating` / `failed`), özet metni (`kategoriler`, `genelOzet`),
+`olusturulmaZamani`, `tarih`, `haberSayisi`, `sonHataZamani`, `hataKodu` (yalnızca
+kısa kod; hata metni saklanmaz) ve `kaynak` alanlarını taşır. Yeniden üretim
+sırasında ya da başarısız denemeden sonra bir önceki başarılı içerik korunur.
+`htp:gun_ozeti:v2:son` son başarılı özeti tutar (bugün henüz özet yokken dünkü özet
+"dünkü özet" uyarısıyla gösterilir); `...:kilit:<tarih>` aynı anda tek Gemini isteğini
+sağlar (SET NX EX 90 sn); `...:bekleme` kullanıcı kaynaklı denemeler arasında 15 dk bekler.
 
-Özeti üreten `POST /api/gun-ozeti-olustur` cron ile **günde 1–4 kez**
-çağrılmalıdır (ör. 09:00, 13:00, 18:00, 23:00). Üretimde Gemini'ye yalnızca
-**bugünün en yeni haberleri** gönderilir: kategori başına en fazla 8 haber,
-ülkeler arasında dengeli (round-robin) seçilir; "önemsiz" haberler dahil
-edilmez. İstek tek deneme ve ~25 sn zaman aşımıyla yapılır (Vercel'in 60 sn'lik
-fonksiyon sınırını aşmamak için). Sonuç `kategoriler`, `genelOzet`,
-`olusturulmaZamani` ve `haberSayisi` alanlarını içerir; arayüz hazırlanma
-zamanını modalın altında gösterir.
+**Zamanlama (Vercel Cron, UTC):** `vercel.json` içinde üç giriş vardır
+(`0 7`, `0 11`, `0 15` * * *) ve hepsi `GET /api/cron/gun-ozeti`'ni çağırır
+(07/11/15 UTC = 10/14/18 İstanbul; Türkiye yıl boyu UTC+3). Vercel Cron yalnızca
+`GET` ile ve UTC'ye göre çalışır; `CRON_SECRET` tanımlıysa `Authorization: Bearer
+<CRON_SECRET>` başlığını kendisi ekler ve uç nokta bunu sabit zamanlı karşılaştırır.
+**`CRON_SECRET` tanımlı değilse (ve `X-Poll-Secret` da gelmiyorsa) uç nokta 401
+döner, cron çalışmaz.** Hobby planda her cron ifadesi günde bir kez çalışabilir
+(bu yüzden üç ayrı giriş vardır) ancak zamanlama saat başı hassasiyetindedir
+(10:00 işi 10:00–10:59 arasında çalışabilir); Pro planda dakika hassasiyeti vardır.
+Vercel aynı çalışmayı nadiren iki kez teslim edebilir: son 60 dk içinde üretilmiş özet
+varsa cron işi atlanır (`sonuc: atlandi`). Harici bir cron servisi
+kullanmak isterseniz `POST /api/gun-ozeti-olustur` (X-Poll-Secret) aynı mantığı çalıştırır.
 
-`POST /api/gun-sonu` (gün sonu e-postası) önce Redis'te **bugün** üretilmiş
-hazır özeti kullanır; yoksa bir kez üretip Redis'e kaydeder.
+**Arayüz akışı:** "Günü Özetle" modalı `GET /api/gun-ozeti`'ni okur (Gemini'yi
+çağırmaz; eski istemciler için `POST` da aynı yanıtı verir). Durumlar: hazır, hazırlanıyor
+(kısa aralıkla yoklanır), hata (önceki özet + neden + "Tekrar dene"), henüz yok (planlı
+saatleri ve sonraki güncellemeyi açıklar). Cron kaçarsa ya da geç kalırsa, planlı saat
+geçtiği halde ondan sonra üretilmiş özet yoksa modal `POST /api/gun-ozeti/yenile` ile
+**kontrollü** yenileme ister: yalnızca özet bayatsa, üretim sürmüyorsa ve son
+kullanıcı kaynaklı denemeden 15 dk geçtiyse Gemini çağrılır (kilit sayesinde
+aynı anda tek istek). Böylece herkese açık modal kotayı tüketemez (günde en fazla
+birkaç istek). Üretimde Gemini'ye yalnızca **bugünün en yeni haberleri** gönderilir:
+kategori başına en fazla 8 haber, ülkeler arasında dengeli; "önemsiz" haberler dahil
+edilmez; tek deneme ve ~25 sn zaman aşımı (Vercel'in 60 sn sınırı için).
+
+`POST /api/gun-sonu` (gün sonu e-postası) bugüne ait içerikli özet varsa onu kullanır
+(Gemini çağrılmaz); yoksa bir kez üretip kaydeder.
 
 ## Piyasa Görünümü ve Haber Nabzı
 
@@ -139,6 +161,7 @@ o sağlayıcının sembol eşlemesini yazmak yeterlidir.
 | `UPSTASH_REDIS_REST_URL` | evet | Upstash Redis REST URL'i. |
 | `UPSTASH_REDIS_REST_TOKEN` | evet | Upstash Redis REST token'ı. |
 | `POLL_SECRET` | evet | Cron/yönetim uç noktalarının gizli anahtarı. **Tanımlı değilse bu uç noktalar hiç çalışmaz (401).** Uzun ve rastgele bir değer seçin. |
+| `CRON_SECRET` | gün özeti cron'u için | Vercel Cron'un `Authorization: Bearer` ile gönderdiği gizli değer (en az 16 rastgele karakter). **Tanımlı değilse `/api/cron/gun-ozeti` 401 döner** (özet yine de arayüzden kontrollü yenilemeyle üretilebilir). |
 | `ALLOWED_ORIGINS` | hayır | CORS için ek izinli originler, virgülle ayrılmış (ör. `https://ornek.com,https://baska.com`). |
 | `GMAIL_ADDRESS` | e-posta için | Bildirimleri gönderecek Gmail adresi. |
 | `GMAIL_APP_PASSWORD` | e-posta için | Google hesabında 2 adımlı doğrulama açıldıktan sonra "Uygulama Şifreleri"nden oluşturulan 16 haneli şifre (normal Gmail şifreniz değildir). |
@@ -168,7 +191,7 @@ istek yöntemini `POST` seçin.
 |----------|-----------------|----------|
 | `/api/haber-cek` | 15 dk'da bir | Kaynakları tarar, kuyruğa ekler. |
 | `/api/haber-siniflandir` | 15 dk'da bir | Kuyruktan bir grubu sınıflandırır. |
-| `/api/gun-ozeti-olustur` | günde 1–4 kez | Gün özetini üretip Redis'e kaydeder. |
+| `/api/cron/gun-ozeti` | **vercel.json'da tanımlı** (10:00/14:00/18:00 İstanbul) | Gün özetini üretip tarih anahtarlı kayda yazar. Harici cron kullanacaksanız `/api/gun-ozeti-olustur` (POST, X-Poll-Secret) aynı işi yapar. |
 | `/api/gun-sonu` | günde bir (ör. 23:45) | Günün özeti + bildirilmemiş haberler e-postası. |
 | `/api/sabah-ozeti` | her sabah 06:00 (İstanbul) | Gece biriken "çok önemli" haberleri e-postayla gönderir. |
 
