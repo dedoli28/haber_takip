@@ -27,7 +27,6 @@ SON_HATALAR_KEY = "htp:son_hatalar"
 SON_GONDERIM_KEY = "htp:son_gonderim"
 BEKLEYEN_SINIFLANDIRMA_KEY = "htp:bekleyen_siniflandirma"
 SON_SINIFLANDIRMA_KEY = "htp:son_siniflandirma"
-GUN_OZETI_KEY = "htp:gun_ozeti"
 
 SINIF_ESIK_LISTESI = ["cok_onemli", "onemli", "bakmaya_deger"]
 
@@ -155,32 +154,3 @@ def son_siniflandirma_yukle() -> str | None:
 
 def son_siniflandirma_kaydet(iso_zaman: str) -> None:
     _set_ham(SON_SINIFLANDIRMA_KEY, iso_zaman)
-
-
-def gun_ozeti_yukle() -> dict | None:
-    """En son basariyla uretilmis gun ozetini dondurur.
-
-    Ozet kullanici butonuna her basildiginda Gemini'ye yeniden gonderilmez;
-    korumali cron endpoint'i tarafindan uretilip burada saklanir.
-    """
-    sonuc = _get_json(GUN_OZETI_KEY, None)
-    return sonuc if isinstance(sonuc, dict) else None
-
-
-def gun_ozeti_kaydet(ozet: dict) -> None:
-    _set_json(GUN_OZETI_KEY, ozet)
-
-
-def istek_siniri_asildi(anahtar: str, sinir: int, pencere_saniye: int) -> bool:
-    """Upstash'in atomik INCR komutuyla dagitik istek siniri uygular."""
-    if not yapilandirilmis_mi():
-        raise RuntimeError("İstek sınırı için Upstash Redis yapılandırılmamış.")
-    resp = requests.post(f"{_BASE_URL}/incr/{anahtar}", headers=_basliklar(), timeout=5)
-    resp.raise_for_status()
-    sayi = int(resp.json().get("result") or 0)
-    if sayi == 1:
-        ttl_resp = requests.post(
-            f"{_BASE_URL}/expire/{anahtar}/{pencere_saniye}", headers=_basliklar(), timeout=5
-        )
-        ttl_resp.raise_for_status()
-    return sayi > sinir

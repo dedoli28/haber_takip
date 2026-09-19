@@ -5,8 +5,8 @@ Mimari:
   - Tarama iki BAGIMSIZ adima bolunmustur (biri yavaslasa/zaman asimina
     ugrasa bile digerini etkilemesin, ikisi de kendi cron'undan ayri ayri
     tetiklenebilsin diye):
-      - /api/haber-cek: Finviz ve RSS kaynaklarini PARALEL
-        ceker (Gemini'ye HIC dokunmaz), daha once gorulmemis
+      - /api/haber-cek: Finviz'deki TUM haber turlerini + bloglari PARALEL
+        ceker (Gemini'ye HIC dokunmaz, ~2sn surer), daha once gorulmemis
         olanlari Upstash Redis'teki bekleme kuyruguna (htp:bekleyen_siniflandirma)
         ekler; artik Finviz'de olmayanlari depodan siler.
       - /api/haber-siniflandir: kuyruktan en fazla
@@ -29,9 +29,8 @@ Mimari:
     bildirilmemis kalan haberleri tek e-postada gonderir, sayaclari sifirlar.
   - /api/haberler: depodaki tum haberleri dondurur (istemci bunlari
     tarih/tur/onem/saat araligina gore kendi tarafinda filtreler/siralar).
-  - /api/analiz: istek basina AI analizi yapar ve oran sinirina tabidir.
-  - /api/gun-ozeti: Redis'teki hazir ozeti okur; AI uretimi yalnizca
-    POLL_SECRET korumali /api/gun-ozeti-olustur tarafindan yapilir.
+  - /api/analiz, /api/gun-ozeti: istege bagli AI islemleri; sunucunun kendi
+    GEMINI_API_KEY'ini kullanir (artik istemciden anahtar alinmiyor).
   - /api/ayarlar: yalnizca bildirim e-postalarini (liste) okur/yazar.
 
 Statik arayuz (static_ui/) ayni uygulama uzerinden servis edilir.
@@ -39,7 +38,6 @@ Statik arayuz (static_ui/) ayni uygulama uzerinden servis edilir.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 from datetime import date, datetime, time as dtime, timezone
@@ -66,18 +64,11 @@ from gemini_client import (
 
 app = FastAPI(title="Haber Takip Platformu")
 
-_varsayilan_originler = "https://haber-takip-nper.vercel.app,http://127.0.0.1:8000,http://localhost:8000"
-ALLOWED_ORIGINS = [
-    origin.strip()
-    for origin in os.environ.get("ALLOWED_ORIGINS", _varsayilan_originler).split(",")
-    if origin.strip()
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "X-Poll-Secret", "X-Settings-Secret"],
+    allow_headers=["*"],
 )
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
@@ -91,7 +82,6 @@ TARA_GRUP_BOYUTU = 10
 # cron-job.org'un sabit 30 saniyelik siniri icinde guvenle kalir. Kuyruktaki
 # fazlasi kuyrukta kalir, bir sonraki cagrida sirayla islenir.
 MAX_ISLENECEK_SINIFLANDIRMA_BASINA = TARA_GRUP_BOYUTU
-GUN_OZETI_KATEGORI_BASINA_AZAMI = 8
 SINIF_ESIK_LISTESI = redis_store.SINIF_ESIK_LISTESI
 SINIF_ETIKET_TR = {"cok_onemli": "Çok Önemli", "onemli": "Önemli", "bakmaya_deger": "Bakmaya Değer"}
 
@@ -113,18 +103,6 @@ ISTANBUL_TZ = ZoneInfo("Europe/Istanbul")
 
 def _gemini_anahtari() -> str:
     return os.environ.get("GEMINI_API_KEY", "")
-
-
-def _istemci_oran_anahtari(request: Request, islem: str) -> str:
-    ip = request.headers.get("x-real-ip") or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-    ip = ip or (request.client.host if request.client else "bilinmeyen")
-    ozet = hashlib.sha256(ip.encode("utf-8")).hexdigest()[:24]
-    return f"htp:rate:{islem}:{ozet}"
-
-
-def _ayarlar_secret_dogrula(request: Request) -> bool:
-    beklenen = os.environ.get("SETTINGS_SECRET") or os.environ.get("POLL_SECRET")
-    return bool(beklenen and request.headers.get("x-settings-secret") == beklenen)
 
 
 def _istanbul_saati() -> datetime:
@@ -172,10 +150,7 @@ def haberler():
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
-    ogeler = list(depo.values())
-    for oge in ogeler:
-        oge.setdefault("ulke", "US")
-    ogeler.sort(key=lambda o: o.get("ilkGorulme", ""), reverse=True)
+    ogeler = sorted(depo.values(), key=lambda o: o.get("ilkGorulme", ""), reverse=True)
     return {"ok": True, "haberler": ogeler, "sonTarama": redis_store.son_tarama_yukle()}
 
 
@@ -228,9 +203,7 @@ def durum():
 
 
 @app.get("/api/ayarlar")
-def ayarlar_getir(request: Request):
-    if not _ayarlar_secret_dogrula(request):
-        return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+def ayarlar_getir():
     try:
         return {"ok": True, "ayarlar": redis_store.ayarlar_yukle()}
     except Exception as e:  # noqa: BLE001
@@ -239,8 +212,6 @@ def ayarlar_getir(request: Request):
 
 @app.post("/api/ayarlar")
 async def ayarlar_guncelle(request: Request):
-    if not _ayarlar_secret_dogrula(request):
-        return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
     body = await request.json()
 
     alicilar = []
@@ -262,15 +233,6 @@ async def ayarlar_guncelle(request: Request):
 
 @app.post("/api/analiz")
 async def analiz(request: Request):
-    try:
-        if redis_store.istek_siniri_asildi(_istemci_oran_anahtari(request, "analiz"), 5, 600):
-            return JSONResponse(
-                {"ok": False, "hata": "Analiz isteği sınırına ulaşıldı. Lütfen 10 dakika sonra tekrar deneyin."},
-                status_code=429,
-            )
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": f"İstek sınırı doğrulanamadı: {e}"}, status_code=503)
-
     body = await request.json()
     baslik = (body.get("baslik") or "").strip()
     ozet = (body.get("ozet") or "").strip()
@@ -294,76 +256,31 @@ async def analiz(request: Request):
 
 
 def _gun_ozeti_olustur(depo: dict, api_key: str) -> dict:
-    """Bugunun en yeni haberlerinden sinirli boyutta bir Gemini girdisi uretir.
-
-    Tum Redis deposunu modele gondermek, depo buyudukce hem token kotasini hem
-    Vercel suresini tuketiyordu. Her kategori icin en yeni kayitlar tutulur.
-    """
-    bugun = _istanbul_saati().date().isoformat()
-    sirali = sorted(depo.values(), key=lambda o: o.get("ilkGorulme", ""), reverse=True)
-    bugunun_ogeleri = [o for o in sirali if o.get("tarih") == bugun]
-    if not bugunun_ogeleri:
-        bugunun_ogeleri = sirali[: GUN_OZETI_KATEGORI_BASINA_AZAMI * 6]
-
-    kategori_adaylari: dict[str, list[dict]] = {}
-    for o in bugunun_ogeleri:
-        kategori_adaylari.setdefault(o.get("kategori", "ana"), []).append(o)
-
-    # En kalabalik ABD akisi diger ulkeleri ozet girdisinin disina itmesin.
-    # Her kategori icinde ulkelerden sirayla haber alinir.
     kategorili: dict[str, list[dict]] = {}
-    for kategori, adaylar in kategori_adaylari.items():
-        ulke_kuyruklari: dict[str, list[dict]] = {}
-        for oge in adaylar:
-            ulke_kuyruklari.setdefault(oge.get("ulke", "US"), []).append(oge)
-        secilen: list[dict] = []
-        while len(secilen) < GUN_OZETI_KATEGORI_BASINA_AZAMI and any(ulke_kuyruklari.values()):
-            for ulke in list(ulke_kuyruklari):
-                if ulke_kuyruklari[ulke] and len(secilen) < GUN_OZETI_KATEGORI_BASINA_AZAMI:
-                    secilen.append(ulke_kuyruklari[ulke].pop(0))
-        kategorili[kategori] = secilen
+    for o in depo.values():
+        kategorili.setdefault(o.get("kategori", "ana"), []).append(o)
 
     prompt = gun_ozeti_prompt_olustur(kategorili)
     schema = gun_ozeti_schema_olustur()
-    sonuc = gemini_json_iste(prompt, schema, api_key, GEMINI_MODEL, timeout_saniye=25, deneme_sayisi=1)
-    return {
-        "kategoriler": sonuc.get("kategoriler", []),
-        "genelOzet": sonuc.get("genel_ozet", ""),
-        "olusturulmaZamani": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
-        "haberSayisi": sum(len(ogeler) for ogeler in kategorili.values()),
-    }
+    sonuc = gemini_json_iste(prompt, schema, api_key, GEMINI_MODEL)
+    return {"kategoriler": sonuc.get("kategoriler", []), "genelOzet": sonuc.get("genel_ozet", "")}
 
 
 @app.post("/api/gun-ozeti")
 def gun_ozeti():
-    try:
-        ozet = redis_store.gun_ozeti_yukle()
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
-    if not ozet:
-        return JSONResponse(
-            {"ok": False, "hata": "Günün özeti henüz hazırlanmadı. Bir sonraki zamanlanmış üretimden sonra hazır olacak."},
-            status_code=503,
-        )
-    return {"ok": True, **ozet}
-
-
-@app.post("/api/gun-ozeti-olustur")
-def gun_ozeti_olustur(request: Request):
-    """Cron tarafindan cagrilir; tek Gemini istegi yapip sonucu Redis'e yazar."""
-    if not _poll_secret_dogrula(request):
-        return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
-
     api_key = _gemini_anahtari()
     if not api_key:
         return JSONResponse({"ok": False, "hata": "Sunucuda GEMINI_API_KEY tanımlı değil."}, status_code=500)
+
     try:
         depo = redis_store.depo_yukle()
-        if not depo:
-            return JSONResponse({"ok": False, "hata": "Özetlenecek haber yok."}, status_code=400)
-        ozet = _gun_ozeti_olustur(depo, api_key)
-        redis_store.gun_ozeti_kaydet(ozet)
-        return {"ok": True, **ozet}
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+    if not depo:
+        return JSONResponse({"ok": False, "hata": "Özetlenecek haber yok."}, status_code=400)
+
+    try:
+        return {"ok": True, **_gun_ozeti_olustur(depo, api_key)}
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
@@ -567,9 +484,9 @@ class TaramaHatasi(Exception):
 
 
 def _haber_cek_calistir() -> dict:
-    """HIZLI adim: Finviz ve RSS kaynaklarini paralel tarar, Gemini'ye dokunmaz.
+    """HIZLI adim: Finviz'i PARALEL tarar, Gemini'ye HIC dokunmaz (~2sn).
     Daha once gorulmemis ogeleri siniflandirma bekleme kuyruguna ekler; artik
-    kaynak akislarinda artik olmayanlari depodan (ve kuyruktan) siler. Basarili durumda
+    Finviz'de olmayanlari depodan (ve kuyruktan) siler. Basarili durumda
     yanit sozlugunu dondurur, hata durumunda TaramaHatasi firlatir."""
 
     try:
@@ -608,7 +525,7 @@ def _haber_cek_calistir() -> dict:
     silinen_urller = [url for url in depo.keys() if url not in guncel_url_seti]
     for url in silinen_urller:
         del depo[url]
-    # Kuyrukta bekleyip artik kaynaklarin guncel listesinde olmayan (ör. akis
+    # Kuyrukta bekleyip artik Finviz'in guncel listesinde olmayan (ör. sayfa
     # kaydiginda dusmus) ogeler de ayni sekilde ayiklanir.
     kuyruk = {url: o for url, o in kuyruk.items() if url in guncel_url_seti}
 
@@ -792,15 +709,15 @@ def _siniflandir_calistir() -> dict:
 def _poll_secret_dogrula(request: Request) -> bool:
     beklenen_sir = os.environ.get("POLL_SECRET")
     if not beklenen_sir:
-        return False
-    gelen_sir = request.headers.get("x-poll-secret")
+        return True
+    gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
     return gelen_sir == beklenen_sir
 
 
 @app.post("/api/haber-cek")
 def haber_cek(request: Request):
     """Disaridan (cron-job.org gibi) her 15 dakikada bir cagrilir; POLL_SECRET
-    ile korunur. Haber kaynaklarini tarar, Gemini'ye dokunmaz - hizli ve
+    ile korunur. Sadece Finviz'i tarar, Gemini'ye dokunmaz - hizli ve
     zaman asimi riski neredeyse yok."""
     if not _poll_secret_dogrula(request):
         return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
@@ -949,7 +866,7 @@ def _depodan_basarisiz_siniflandirmalari_ayikla(depo: dict) -> int:
 
 
 @app.post("/api/depo-sifirla")
-def depo_sifirla(request: Request):
+def depo_sifirla():
     """TUM haber deposunu sifirlar (butun haberleri kalici olarak siler).
     Kok nedeni duzeltilen bir hata (id carpismasi) yuzunden gecmiste bazi
     haberlerin Turkce basligi/ozeti BASKA, alakasiz bir habere ait olmus
@@ -958,8 +875,6 @@ def depo_sifirla(request: Request):
     haberleri normal sekilde yeniden cekip (artik duzeltilmis id mantigiyla)
     dogru siniflandirir. Bildirim ayarlari/e-posta listesi ETKILENMEZ,
     yalnizca haber deposu sifirlanir. Geri alinamaz, bilerek kullanin."""
-    if not _poll_secret_dogrula(request):
-        return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
     try:
         redis_store.depo_kaydet({})
         redis_store.sayaclari_kaydet({})
@@ -970,13 +885,11 @@ def depo_sifirla(request: Request):
 
 
 @app.post("/api/depo-tekillestir")
-def depo_tekillestir(request: Request):
+def depo_tekillestir():
     """Ayarlar'daki 'Mükerrer Haberleri Temizle' butonu tarafindan elle de
     cagrilabilir; ayni islem artik her /api/tara taramasinda otomatik
     calistigi icin normalde gerek kalmaz. Zararsiz/geri alinabilir bir islem
     oldugu icin sir gerektirmez."""
-    if not _poll_secret_dogrula(request):
-        return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
     try:
         depo = redis_store.depo_yukle()
     except Exception as e:  # noqa: BLE001
@@ -993,13 +906,11 @@ def depo_tekillestir(request: Request):
 
 
 @app.post("/api/basarisiz-siniflandirmalari-temizle")
-def basarisiz_siniflandirmalari_temizle(request: Request):
+def basarisiz_siniflandirmalari_temizle():
     """Ayarlar'daki 'Bozuk Kayıtları Temizle' butonu tarafindan elle de
     cagrilabilir; ayni islem artik her /api/tara taramasinda otomatik
     calistigi icin normalde gerek kalmaz. Zararsiz/geri alinabilir bir islem
     oldugu icin sir gerektirmez."""
-    if not _poll_secret_dogrula(request):
-        return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
     try:
         depo = redis_store.depo_yukle()
     except Exception as e:  # noqa: BLE001
@@ -1023,8 +934,11 @@ def gun_sonu(request: Request):
     bildirilmemis kalan haberleri TEK bir e-postada gonderir, ardindan o
     alicinin sayaclarini sifirlar (yeni gune temiz baslar). /api/tara ile
     ayni POLL_SECRET korumasini kullanir."""
-    if not _poll_secret_dogrula(request):
-        return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+    beklenen_sir = os.environ.get("POLL_SECRET")
+    if beklenen_sir:
+        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
+        if gelen_sir != beklenen_sir:
+            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
 
     api_key = _gemini_anahtari()
     if not api_key:
@@ -1044,8 +958,7 @@ def gun_sonu(request: Request):
     gun_ozeti = {"kategoriler": [], "genelOzet": ""}
     if depo:
         try:
-            gun_ozeti = redis_store.gun_ozeti_yukle() or _gun_ozeti_olustur(depo, api_key)
-            redis_store.gun_ozeti_kaydet(gun_ozeti)
+            gun_ozeti = _gun_ozeti_olustur(depo, api_key)
         except Exception as e:  # noqa: BLE001
             gun_ozeti = {"kategoriler": [], "genelOzet": f"Gün özeti oluşturulamadı: {e}"}
 
@@ -1088,8 +1001,11 @@ def sabah_ozeti(request: Request):
     cok_onemli sayacini sifirlar (onemli/bakmaya_deger sayaclari etkilenmez,
     normal akista ya gun icinde esigi asar ya da gun sonunda gonderilir).
     /api/tara ile ayni POLL_SECRET korumasini kullanir."""
-    if not _poll_secret_dogrula(request):
-        return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+    beklenen_sir = os.environ.get("POLL_SECRET")
+    if beklenen_sir:
+        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
+        if gelen_sir != beklenen_sir:
+            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
 
     try:
         depo = redis_store.depo_yukle()
@@ -1151,8 +1067,11 @@ def sentetik_haber_ekle(request: Request):
     adresli sahte URL'ler kullanir; bir sonraki GERCEK taramada Finviz'de
     bulunamayacaklari icin otomatik olarak depodan silinirler (kendiliginden
     temizlenir, elle silmeye gerek yoktur)."""
-    if not _poll_secret_dogrula(request):
-        return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+    beklenen_sir = os.environ.get("POLL_SECRET")
+    if beklenen_sir:
+        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
+        if gelen_sir != beklenen_sir:
+            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
 
     sinif = request.query_params.get("sinif", "cok_onemli")
     if sinif not in SINIF_ESIK_LISTESI:
@@ -1206,8 +1125,11 @@ def sentetik_haber_temizle(request: Request):
     """/api/sentetik-haber ile eklenen tum sahte test haberlerini
     (kaynak == 'sentetik-test' olanlari) depodan hemen siler; bir sonraki
     gercek taramayi beklemek istemeyenler icin. Ayni POLL_SECRET korumasi."""
-    if not _poll_secret_dogrula(request):
-        return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
+    beklenen_sir = os.environ.get("POLL_SECRET")
+    if beklenen_sir:
+        gelen_sir = request.headers.get("x-poll-secret") or request.query_params.get("secret")
+        if gelen_sir != beklenen_sir:
+            return JSONResponse({"ok": False, "hata": "Yetkisiz."}, status_code=401)
 
     try:
         depo = redis_store.depo_yukle()
