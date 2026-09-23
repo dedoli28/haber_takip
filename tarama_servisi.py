@@ -88,7 +88,11 @@ def yenile(evren: str = VARSAYILAN_EVREN, *, kaynak: str = "cron") -> dict:
         try:
             hisseler, hatalar = finviz_tarama.tarama_verisi_cek(evren)
         except Exception as e:  # noqa: BLE001
-            log.warning("tarama basarisiz (%s): %s", evren, type(e).__name__)
+            ek = ""
+            yanit = getattr(e, "response", None)
+            if yanit is not None:
+                ek = f" [http={yanit.status_code} govde={yanit.text[:200]!r}]"
+            log.warning("tarama basarisiz (%s): %s%s", evren, type(e).__name__, ek)
             return {"sonuc": "hata", "evren": evren, "hata": type(e).__name__}
         if not hisseler:
             return {"sonuc": "hata", "evren": evren, "hata": "veri_yok"}
