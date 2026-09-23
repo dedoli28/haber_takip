@@ -8,6 +8,13 @@ canli istekle dogrulanmis, herkese acik degerlerdir. Elite hesabi varsa
 sayfa basina daha fazla satir donebilir (bu modul buna gore tasarlanmamistir,
 sayfalama sabit SAYFA_BOYUTU varsayimiyla calisir) ama gerekli degildir.
 
+Not: Finviz, Cloudflare arkasinda; bulut/sunucu IP'lerine (ör. Vercel'in
+serverless fonksiyonlari) duz `requests` ile istek atildiginda 403 + JS
+meydan okuma sayfasi ("Just a moment...") donebilir (gelistirme ortaminda
+sorun cikmadi ama Vercel'de canli olarak gozlemlendi). Bu yuzden `requests`
+yerine `cloudscraper` kullanilir (bkz. _istemci()); bu, standart Cloudflare
+JS meydan okumasini kod icinde cozer, ekstra ikili/tarayici gerektirmez.
+
 Sutun kimlikleri (her biri TEK TEK, c=0,1,<id> istegiyle dogrulanmis - Finviz
 geciz/geciksiz id'leri sessizce atlayip kalanlari kaydirdigi icin genis bir
 c= listesiyle toplu istek atip sirayla okumak yanlis eslesmeye yol aciyordu):
@@ -22,11 +29,11 @@ from __future__ import annotations
 
 import concurrent.futures
 import re
-import time
+import threading
 import warnings
 from datetime import datetime, timezone
 
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 
 warnings.filterwarnings("ignore", module="bs4")
@@ -73,13 +80,23 @@ SEKTOR_KODU = {
     "Utilities": "utilities",
 }
 
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "en-US,en;q=0.9",
-}
+_scraper: cloudscraper.CloudScraper | None = None
+_scraper_kilit = threading.Lock()
+
+
+def _istemci() -> cloudscraper.CloudScraper:
+    """Paylasilan, Cloudflare JS meydan okumasini cozebilen istemci (Vercel'in
+    sunucu IP'si Finviz'in Cloudflare korumasindan 403 "Just a moment..."
+    aliyor; duz requests.get bunu asamiyor). Tek ornek: meydan okuma bir kez
+    cozulur, sayfalar arasinda ayni oturum/cookie'lerle yeniden kullanilir."""
+    global _scraper
+    if _scraper is None:
+        with _scraper_kilit:
+            if _scraper is None:
+                _scraper = cloudscraper.create_scraper(
+                    browser={"browser": "chrome", "platform": "windows", "mobile": False}
+                )
+    return _scraper
 
 
 def _sayi_ayristir(metin: str) -> float | None:
@@ -162,7 +179,7 @@ def _sayfa_cek(filtre: str, baslangic_satir: int) -> list[dict]:
         params["f"] = filtre
     if baslangic_satir > 1:
         params["r"] = str(baslangic_satir)
-    resp = requests.get(TARAMA_URL, params=params, headers=_HEADERS, timeout=20)
+    resp = _istemci().get(TARAMA_URL, params=params, timeout=25)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
     return _sayfayi_ayristir(soup)
@@ -184,10 +201,10 @@ def tarama_verisi_cek(evren: str = "sp500", azami_paralel: int = 6) -> tuple[lis
     filtre = EVREN_FILTRE_KODU.get(evren, EVREN_FILTRE_KODU["sp500"])
     hatalar: list[str] = []
 
-    resp = requests.get(
+    resp = _istemci().get(
         TARAMA_URL,
         params={"v": "151", "f": filtre, "c": ",".join(str(i) for i in [0, *SUTUN_ID_SIRASI])},
-        headers=_HEADERS, timeout=20,
+        timeout=25,
     )
     resp.raise_for_status()
     ilk_soup = BeautifulSoup(resp.text, "html.parser")
