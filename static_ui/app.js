@@ -1441,6 +1441,570 @@ function kayitliPaneliOlustur() {
   return ciz;
 }
 
+/* ===================== Tarama analizi modal ===================== */
+let taramaAnalizOturum = 0;
+
+function taramaAnalizModalBaslat() {
+  modalBagla("taramaAnalizOverlay", "closeTaramaAnaliz");
+}
+
+function taramaAnalizEylemleri(...butonlar) {
+  const kutu = $("taramaAnalizActions");
+  kutu.textContent = "";
+  const liste = butonlar.filter(Boolean);
+  liste.forEach((b) => kutu.appendChild(b));
+  kutu.hidden = liste.length === 0;
+}
+
+function taramaAnalizMesajGoster(metin) {
+  const govde = $("taramaAnalizBody");
+  govde.textContent = "";
+  const p = document.createElement("p");
+  p.className = "detail-summary";
+  p.textContent = metin;
+  govde.appendChild(p);
+  taramaAnalizEylemleri();
+}
+
+function taramaAnalizIcerikCiz(y) {
+  const govde = $("taramaAnalizBody");
+  govde.textContent = "";
+
+  if (y.temalar) {
+    const p = document.createElement("p");
+    p.className = "detail-summary";
+    p.textContent = y.temalar;
+    govde.appendChild(p);
+  }
+
+  if (y.dikkatCekenler && y.dikkatCekenler.length) {
+    const baslik = document.createElement("p");
+    baslik.className = "modal-section-title";
+    baslik.style.marginTop = "14px";
+    baslik.textContent = "Dikkat Çekenler";
+    govde.appendChild(baslik);
+
+    const liste = document.createElement("ul");
+    liste.className = "tarama-analiz-liste";
+    y.dikkatCekenler.forEach((d) => {
+      const li = document.createElement("li");
+      const b = document.createElement("b");
+      b.textContent = d.ticker;
+      li.appendChild(b);
+      li.appendChild(document.createTextNode(` — ${d.not}`));
+      liste.appendChild(li);
+    });
+    govde.appendChild(liste);
+  }
+
+  if (y.uyari) {
+    const ayrac = document.createElement("div");
+    ayrac.className = "modal-divider";
+    ayrac.style.margin = "14px 0";
+    govde.appendChild(ayrac);
+    const u = document.createElement("p");
+    u.className = "modal-hint";
+    u.textContent = y.uyari;
+    govde.appendChild(u);
+  }
+
+  taramaAnalizEylemleri();
+}
+
+async function taramaAnalizIste(hisseler, filtreOzeti) {
+  const oturum = ++taramaAnalizOturum;
+  const govde = $("taramaAnalizBody");
+  govde.setAttribute("aria-busy", "true");
+  taramaAnalizMesajGoster("Analiz hazırlanıyor...");
+  try {
+    const resp = await fetch("/api/tarama/analiz", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hisseler, filtreOzeti }),
+    });
+    let yanit = null;
+    try { yanit = await resp.json(); } catch (e) { yanit = null; }
+    if (oturum !== taramaAnalizOturum) return;
+    if (!resp.ok || !yanit || !yanit.ok) {
+      const limit = resp.status === 429;
+      const mesaj = (yanit && yanit.hata) || (limit ? "Çok fazla analiz isteği gönderildi; biraz sonra tekrar deneyin." : "Analiz alınamadı.");
+      taramaAnalizMesajGoster(mesaj);
+      taramaAnalizEylemleri(butonOlustur("Tekrar dene", "btn btn-primary btn-sm", () => taramaAnalizIste(hisseler, filtreOzeti)));
+      toast(mesaj, limit ? "warn" : "error");
+      return;
+    }
+    taramaAnalizIcerikCiz(yanit);
+  } catch (e) {
+    if (oturum !== taramaAnalizOturum) return;
+    taramaAnalizMesajGoster("Bağlantı kurulamadı. Lütfen tekrar deneyin.");
+    taramaAnalizEylemleri(butonOlustur("Tekrar dene", "btn btn-primary btn-sm", () => taramaAnalizIste(hisseler, filtreOzeti)));
+  } finally {
+    if (oturum === taramaAnalizOturum) govde.setAttribute("aria-busy", "false");
+  }
+}
+
+/* ===================== Tarama (screener) paneli ===================== */
+function taramaSayiGoster(deger, ondalik = 2, birim = "") {
+  if (deger === null || deger === undefined || Number.isNaN(deger)) return "–";
+  return deger.toLocaleString("tr-TR", { minimumFractionDigits: ondalik, maximumFractionDigits: ondalik }) + birim;
+}
+
+// tablo/iskelet/durum kutularının görünürlüğünü tek yerden yönetir (market.js'teki durumGoster ile aynı fikir).
+function taramaDurumGoster(tur, bilgi, tekrarFn) {
+  const kap = $("taramaTabloKutusu");
+  const iskelet = kap.querySelector(".market-iskelet");
+  const durumKutusu = kap.querySelector(".market-durum");
+  const tablo = $("taramaTablo");
+  iskelet.hidden = tur !== "yukleniyor";
+  durumKutusu.hidden = tur !== "durum";
+  tablo.hidden = tur !== "hazir";
+  kap.setAttribute("aria-busy", tur === "yukleniyor" ? "true" : "false");
+  if (tur !== "durum") return;
+
+  durumKutusu.textContent = "";
+  const p = document.createElement("p");
+  p.className = "market-durum-mesaj";
+  p.setAttribute("role", "status");
+  p.textContent = bilgi.mesaj;
+  durumKutusu.appendChild(p);
+  if (bilgi.tekrar && tekrarFn) {
+    durumKutusu.appendChild(butonOlustur("Yeniden dene", "btn btn-outline btn-sm market-tekrar", tekrarFn));
+  }
+}
+
+const TARAMA_TABLO_ALANLARI = ["ticker", "sirket", "sektor", "ulke", "fiyat", "degisim_yuzde", "forward_pe", "peg", "p_fcf", "ev_ebitda", "ev_ebit", "fcf_yield"];
+
+function taramaPaneliOlustur() {
+  const state = {
+    configYuklendi: false,
+    ilkYuklemeBasladi: false,
+    evrenler: [],
+    filtreTanimlari: [],
+    evren: "sp500",
+    hisseler: [],
+    guncellendi: null,
+    yuklendi: false,
+    arama: "",
+    siralamaAlan: null,
+    siralamaTers: false,
+    iptal: null,
+    oranZamanlayici: null,
+  };
+
+  // Sektör/ülke seçenekleri evrene göre değiştiği için gerçek çip grupları config
+  // yüklenince (ve evren değişince) sektorUlkeChipleriniKur() içinde yeniden kurulur.
+  let sektor = cokluSecimGrubuBaslat([], "sektor", () => { rozetGuncelle(); ciz(); });
+  let ulke = cokluSecimGrubuBaslat([], "ulke", () => { rozetGuncelle(); ciz(); });
+
+  filtrePopoverBaslat("taramaFiltreBtn", "taramaFiltrePopover");
+
+  const evrenSelect = $("taramaEvren");
+  const aramaInput = $("taramaArama");
+  const oranKutusu = $("taramaOranFiltreleri");
+
+  function oranInputId(alan, uc) { return `taramaOran_${alan}_${uc}`; }
+
+  function oranDegerleriAl() {
+    const sonuc = {};
+    state.filtreTanimlari.forEach((f) => {
+      const minEl = $(oranInputId(f.alan, "min"));
+      const maxEl = $(oranInputId(f.alan, "max"));
+      const minV = minEl && minEl.value !== "" ? parseFloat(minEl.value) : null;
+      const maxV = maxEl && maxEl.value !== "" ? parseFloat(maxEl.value) : null;
+      sonuc[f.alan] = [Number.isFinite(minV) ? minV : null, Number.isFinite(maxV) ? maxV : null];
+    });
+    return sonuc;
+  }
+
+  // Bir oran filtresi "aktif" sayılır: kutucuklardan biri boş değilse — varsayılan
+  // aralıklar sayfa açılışında zaten dolu geldiği için ("Temizle" ile boşaltılana
+  // kadar) bunlar da aktif filtre rozetinde/etiketlerinde görünür (aksi halde
+  // kullanıcı, sonuçların neden az geldiğini gösteren hiçbir ipucu göremez).
+  function oranAktifMi(f) {
+    const [minV, maxV] = oranDegerleriAl()[f.alan];
+    return minV !== null || maxV !== null;
+  }
+
+  function oranFiltreleriniCiz() {
+    oranKutusu.innerHTML = "";
+    state.filtreTanimlari.forEach((f) => {
+      const satir = document.createElement("div");
+      satir.className = "tarama-oran-satir";
+
+      const etiket = document.createElement("span");
+      etiket.className = "tarama-oran-etiket";
+      if (f.yaklasik) {
+        const abbr = document.createElement("abbr");
+        abbr.title = "Finviz'de doğrudan yok; yaklaşık hesaplanır.";
+        abbr.textContent = f.etiket;
+        etiket.appendChild(abbr);
+      } else {
+        etiket.textContent = f.etiket;
+      }
+      satir.appendChild(etiket);
+
+      const minInput = document.createElement("input");
+      minInput.type = "number";
+      minInput.step = "any";
+      minInput.id = oranInputId(f.alan, "min");
+      minInput.placeholder = "min";
+      minInput.value = f.varsayilan_min != null ? f.varsayilan_min : "";
+      minInput.setAttribute("aria-label", `${f.etiket} minimum`);
+      satir.appendChild(minInput);
+
+      const ayrac = document.createElement("span");
+      ayrac.className = "tarama-oran-ayrac";
+      ayrac.textContent = "–";
+      satir.appendChild(ayrac);
+
+      const maxInput = document.createElement("input");
+      maxInput.type = "number";
+      maxInput.step = "any";
+      maxInput.id = oranInputId(f.alan, "max");
+      maxInput.placeholder = "maks";
+      maxInput.value = f.varsayilan_max != null ? f.varsayilan_max : "";
+      maxInput.setAttribute("aria-label", `${f.etiket} maksimum`);
+      satir.appendChild(maxInput);
+
+      const birim = document.createElement("span");
+      birim.className = "tarama-oran-birim";
+      birim.textContent = f.birim || "";
+      satir.appendChild(birim);
+
+      [minInput, maxInput].forEach((inp) => {
+        inp.addEventListener("input", () => {
+          clearTimeout(state.oranZamanlayici);
+          state.oranZamanlayici = setTimeout(() => { rozetGuncelle(); ciz(); }, 200);
+        });
+      });
+
+      oranKutusu.appendChild(satir);
+    });
+  }
+
+  function chipOlustur(deger, etiket, attrAd, tumuMu) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip" + (tumuMu ? " chip-all is-active" : "");
+    b.dataset[attrAd] = deger;
+    b.textContent = etiket;
+    return b;
+  }
+
+  function sektorUlkeChipleriniKur(evrenBilgisi) {
+    const sektorKutu = $("taramaSektorChips");
+    const ulkeKutu = $("taramaUlkeChips");
+    sektorKutu.innerHTML = "";
+    ulkeKutu.innerHTML = "";
+    sektorKutu.appendChild(chipOlustur("", "Tümü", "sektor", true));
+    (evrenBilgisi.sektorler || []).forEach((s) => sektorKutu.appendChild(chipOlustur(s, s, "sektor", false)));
+    ulkeKutu.appendChild(chipOlustur("", "Tümü", "ulke", true));
+    (evrenBilgisi.ulkeler || []).forEach((u) => ulkeKutu.appendChild(chipOlustur(u, u, "ulke", false)));
+
+    sektor = cokluSecimGrubuBaslat([...sektorKutu.querySelectorAll(".chip")], "sektor", () => { rozetGuncelle(); ciz(); });
+    ulke = cokluSecimGrubuBaslat([...ulkeKutu.querySelectorAll(".chip")], "ulke", () => { rozetGuncelle(); ciz(); });
+  }
+
+  function rozetGuncelle() {
+    const oranAktif = state.filtreTanimlari.filter(oranAktifMi).length;
+    filtreRozetGuncelle("taramaFiltreRozet", oranAktif + sektor.secili.size + ulke.secili.size);
+  }
+
+  function tumFiltreleriTemizle() {
+    state.filtreTanimlari.forEach((f) => {
+      $(oranInputId(f.alan, "min")).value = "";
+      $(oranInputId(f.alan, "max")).value = "";
+    });
+    sektor.temizle();
+    ulke.temizle();
+    aramaInput.value = "";
+    state.arama = "";
+    rozetGuncelle();
+    ciz();
+  }
+  $("taramaFiltreTemizleBtn").addEventListener("click", tumFiltreleriTemizle);
+
+  function filtrele() {
+    let gorulen = state.hisseler;
+    const oranlar = oranDegerleriAl();
+    Object.keys(oranlar).forEach((alan) => {
+      const [minV, maxV] = oranlar[alan];
+      if (minV === null && maxV === null) return;
+      gorulen = gorulen.filter((h) => {
+        const v = h[alan];
+        if (v === null || v === undefined) return false;
+        if (minV !== null && v < minV) return false;
+        if (maxV !== null && v > maxV) return false;
+        return true;
+      });
+    });
+    if (sektor.secili.size > 0) gorulen = gorulen.filter((h) => sektor.secili.has(h.sektor));
+    if (ulke.secili.size > 0) gorulen = gorulen.filter((h) => ulke.secili.has(h.ulke));
+    if (state.arama) {
+      const q = state.arama.toLowerCase();
+      gorulen = gorulen.filter((h) => (h.ticker || "").toLowerCase().includes(q) || (h.sirket || "").toLowerCase().includes(q));
+    }
+    if (state.siralamaAlan) {
+      const alan = state.siralamaAlan;
+      gorulen = gorulen.slice().sort((a, b) => {
+        const va = a[alan], vb = b[alan];
+        const aBos = va === null || va === undefined || va === "";
+        const bBos = vb === null || vb === undefined || vb === "";
+        if (aBos && bBos) return 0;
+        if (aBos) return 1;
+        if (bBos) return -1;
+        const cmp = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb), "tr");
+        return state.siralamaTers ? -cmp : cmp;
+      });
+    }
+    return gorulen;
+  }
+
+  function aktifFiltreleriCiz() {
+    const kutu = $("taramaAktifFiltreler");
+    kutu.textContent = "";
+    const etiketler = [];
+    const ekle = (metin, kaldir) => etiketler.push(aktifFiltreEtiketiOlustur(metin, () => { kaldir(); rozetGuncelle(); ciz(); }));
+
+    if (state.arama) ekle(`Arama: ${state.arama}`, () => { aramaInput.value = ""; state.arama = ""; });
+    const oranlar = oranDegerleriAl();
+    state.filtreTanimlari.forEach((f) => {
+      if (!oranAktifMi(f)) return;
+      const [minV, maxV] = oranlar[f.alan];
+      ekle(`${f.etiket}: ${minV !== null ? minV : "sınırsız"}${f.birim || ""}–${maxV !== null ? maxV : "sınırsız"}${f.birim || ""}`, () => {
+        $(oranInputId(f.alan, "min")).value = "";
+        $(oranInputId(f.alan, "max")).value = "";
+      });
+    });
+    [...sektor.secili].forEach((d) => ekle(`Sektör: ${d}`, () => sektor.sil(d)));
+    [...ulke.secili].forEach((d) => ekle(`Ülke: ${d}`, () => ulke.sil(d)));
+    etiketler.forEach((e) => kutu.appendChild(e));
+    if (etiketler.length >= 2) kutu.appendChild(butonOlustur("Tümünü temizle", "filter-tag filter-tag-temizle", tumFiltreleriTemizle));
+    kutu.hidden = etiketler.length === 0;
+  }
+
+  function hucreDoldur(tr, h, alan) {
+    const td = document.createElement("td");
+    if (alan === "ticker") {
+      td.className = "tarama-td-ticker";
+      td.textContent = h.ticker || "";
+    } else if (alan === "sirket") {
+      td.className = "tarama-td-sirket";
+      td.textContent = h.sirket || "";
+    } else if (alan === "sektor" || alan === "ulke") {
+      td.textContent = h[alan] || "–";
+    } else if (alan === "fiyat") {
+      td.textContent = h.fiyat != null ? taramaSayiGoster(h.fiyat, 2, " $") : "–";
+    } else if (alan === "degisim_yuzde") {
+      const v = h.degisim_yuzde;
+      td.textContent = v != null ? `${v > 0 ? "+" : ""}${taramaSayiGoster(v, 2, "%")}` : "–";
+      if (v != null) td.className = v >= 0 ? "up" : "down";
+    } else {
+      const v = h[alan];
+      td.textContent = taramaSayiGoster(v, 2, alan === "fcf_yield" ? "%" : "");
+      const tanim = state.filtreTanimlari.find((f) => f.alan === alan);
+      if (tanim && v != null) {
+        const uygun = (tanim.varsayilan_min == null || v >= tanim.varsayilan_min) && (tanim.varsayilan_max == null || v <= tanim.varsayilan_max);
+        td.classList.add(uygun ? "tarama-uygun" : "tarama-uygun-degil");
+      }
+    }
+    tr.appendChild(td);
+  }
+
+  function satirOlustur(h, index) {
+    const tr = document.createElement("tr");
+    tr.tabIndex = 0;
+    tr.setAttribute("role", "button");
+    tr.style.animationDelay = `${Math.min(index * 15, 250)}ms`;
+    TARAMA_TABLO_ALANLARI.forEach((alan) => hucreDoldur(tr, h, alan));
+    const ac = () => window.open(`https://finviz.com/quote.ashx?t=${encodeURIComponent(h.ticker)}`, "_blank", "noopener");
+    tr.addEventListener("click", ac);
+    tr.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); ac(); }
+    });
+    return tr;
+  }
+
+  function siralamaBaslikGuncelle() {
+    document.querySelectorAll(".tarama-th-sirala").forEach((btn) => {
+      const aktif = btn.dataset.alan === state.siralamaAlan;
+      btn.classList.toggle("is-active", aktif);
+      let okEl = btn.querySelector(".tarama-ok");
+      if (aktif) {
+        if (!okEl) {
+          okEl = document.createElement("span");
+          okEl.className = "tarama-ok";
+          okEl.setAttribute("aria-hidden", "true");
+          btn.appendChild(okEl);
+        }
+        okEl.textContent = state.siralamaTers ? "▼" : "▲";
+      } else if (okEl) {
+        okEl.remove();
+      }
+    });
+  }
+
+  document.querySelectorAll(".tarama-th-sirala").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const alan = btn.dataset.alan;
+      if (state.siralamaAlan === alan) state.siralamaTers = !state.siralamaTers;
+      else { state.siralamaAlan = alan; state.siralamaTers = false; }
+      siralamaBaslikGuncelle();
+      ciz();
+    });
+  });
+
+  function durumSatiriYaz(gorulenSayisi) {
+    const kutu = $("taramaDurumSatiri");
+    if (!state.yuklendi) { kutu.textContent = "Tarama verisi yükleniyor…"; return; }
+    let metin = `${gorulenSayisi} / ${state.hisseler.length} hisse gösteriliyor`;
+    if (state.guncellendi) {
+      const t = new Date(state.guncellendi);
+      if (!isNaN(t.getTime())) metin += ` · Son güncelleme: ${kisaZaman(t)} (${goreliZaman(t)})`;
+    }
+    kutu.textContent = metin;
+  }
+
+  function ciz() {
+    aktifFiltreleriCiz();
+    if (!state.yuklendi) return;
+    const gorulen = filtrele();
+    durumSatiriYaz(gorulen.length);
+    $("taramaAnalizBtn").disabled = gorulen.length === 0;
+
+    const govde = $("taramaTabloGovde");
+    govde.innerHTML = "";
+    if (gorulen.length === 0) {
+      taramaDurumGoster(
+        "durum",
+        {
+          mesaj: state.hisseler.length ? "Seçilen filtre/aramayla eşleşen hisse yok." : "Bu evren için tarama verisi henüz yok; arka plan taraması ilk sonuçları getirdiğinde burada görünecek.",
+          tekrar: state.hisseler.length === 0,
+        },
+        () => taramaSonuclariYukle(false)
+      );
+      return;
+    }
+    taramaDurumGoster("hazir");
+    const parca = document.createDocumentFragment();
+    gorulen.forEach((h, i) => parca.appendChild(satirOlustur(h, i)));
+    govde.appendChild(parca);
+  }
+
+  function taramaFiltreOzetiOlustur() {
+    const parcalar = [];
+    const oranlar = oranDegerleriAl();
+    state.filtreTanimlari.forEach((f) => {
+      const [minV, maxV] = oranlar[f.alan];
+      if (minV === null && maxV === null) return;
+      parcalar.push(`${f.etiket}: ${minV !== null ? minV : "sınırsız"}–${maxV !== null ? maxV : "sınırsız"}${f.birim || ""}`);
+    });
+    if (sektor.secili.size) parcalar.push(`Sektör: ${[...sektor.secili].join(", ")}`);
+    if (ulke.secili.size) parcalar.push(`Ülke: ${[...ulke.secili].join(", ")}`);
+    const evrenAdi = (state.evrenler.find((e) => e.kod === state.evren) || {}).ad || state.evren;
+    parcalar.push(`Evren: ${evrenAdi}`);
+    return parcalar.join(" · ");
+  }
+
+  async function taramaConfigYukle() {
+    try {
+      const resp = await fetch("/api/tarama/config");
+      const yanit = await resp.json();
+      if (!resp.ok || !yanit.ok) throw new Error("http");
+
+      state.evrenler = yanit.evrenler || [];
+      state.filtreTanimlari = yanit.filtreler || [];
+      state.evren = yanit.varsayilanEvren || (state.evrenler[0] && state.evrenler[0].kod) || state.evren;
+
+      evrenSelect.innerHTML = "";
+      state.evrenler.forEach((e) => {
+        const opt = document.createElement("option");
+        opt.value = e.kod;
+        opt.textContent = e.ad;
+        evrenSelect.appendChild(opt);
+      });
+      evrenSelect.value = state.evren;
+
+      oranFiltreleriniCiz();
+      sektorUlkeChipleriniKur(state.evrenler.find((e) => e.kod === state.evren) || {});
+      rozetGuncelle();
+      state.configYuklendi = true;
+      return true;
+    } catch (e) {
+      taramaDurumGoster("durum", { mesaj: "Tarama ayarları alınamadı.", tekrar: true }, taramaIlkYukle);
+      return false;
+    }
+  }
+
+  async function taramaSonuclariYukle(sessiz) {
+    if (state.iptal) state.iptal.abort();
+    const ac = new AbortController();
+    state.iptal = ac;
+    const zaman = setTimeout(() => ac.abort(), HABER_ISTEK_ZAMAN_ASIMI_MS);
+
+    if (!sessiz) { taramaDurumGoster("yukleniyor"); ustProgres(true); }
+    try {
+      const resp = await fetch(`/api/tarama/sonuclar?evren=${encodeURIComponent(state.evren)}`, { signal: ac.signal });
+      let yanit = null;
+      try { yanit = await resp.json(); } catch (e) { yanit = null; }
+      if (!resp.ok || !yanit || !yanit.ok) throw { durum: resp.status || 500 };
+      if (state.iptal !== ac) return;
+
+      state.hisseler = yanit.hisseler || [];
+      state.guncellendi = yanit.guncellendi || null;
+      state.yuklendi = true;
+      ciz();
+    } catch (e) {
+      if (state.iptal !== ac) return;
+      state.yuklendi = true;
+      const zamanAsimi = e && e.name === "AbortError";
+      const mesaj = zamanAsimi ? "Sunucu zamanında yanıt vermedi." : "Tarama sonuçları alınamadı. Lütfen tekrar deneyin.";
+      taramaDurumGoster("durum", { mesaj, tekrar: true }, () => taramaSonuclariYukle(false));
+      if (!sessiz) toast(mesaj, "error");
+    } finally {
+      clearTimeout(zaman);
+      if (!sessiz) ustProgres(false);
+    }
+  }
+
+  evrenSelect.addEventListener("change", async () => {
+    state.evren = evrenSelect.value;
+    state.yuklendi = false;
+    state.siralamaAlan = null;
+    state.siralamaTers = false;
+    siralamaBaslikGuncelle();
+    sektorUlkeChipleriniKur(state.evrenler.find((e) => e.kod === state.evren) || {});
+    rozetGuncelle();
+    await taramaSonuclariYukle(false);
+  });
+
+  $("taramaYenileBtn").addEventListener("click", () => taramaSonuclariYukle(false));
+
+  let taramaAramaZamanlayici = null;
+  aramaInput.addEventListener("input", () => {
+    state.arama = aramaInput.value.trim();
+    clearTimeout(taramaAramaZamanlayici);
+    taramaAramaZamanlayici = setTimeout(ciz, 120);
+  });
+
+  $("taramaAnalizBtn").addEventListener("click", (e) => {
+    const gorulen = filtrele();
+    if (gorulen.length === 0) return;
+    modalAc("taramaAnalizOverlay", { tetikleyici: e.currentTarget, ilkOdak: "closeTaramaAnaliz" });
+    taramaAnalizIste(gorulen.slice(0, 150), taramaFiltreOzetiOlustur());
+  });
+
+  async function taramaIlkYukle() {
+    if (state.ilkYuklemeBasladi) return;
+    state.ilkYuklemeBasladi = true;
+    taramaDurumGoster("yukleniyor");
+    const tamam = await taramaConfigYukle();
+    if (tamam) await taramaSonuclariYukle(false);
+  }
+
+  return taramaIlkYukle;
+}
+
 /* ===================== Başlat ===================== */
 function baslat() {
   $("toastStack").setAttribute("aria-live", "polite");
@@ -1451,8 +2015,12 @@ function baslat() {
   const kayitliYenile = kayitliPaneliOlustur();
   detayModalBaslat(kayitliYenile);
 
+  taramaAnalizModalBaslat();
+  const taramaIlkYukle = taramaPaneliOlustur();
+
   sekmeBaslat((sekme) => {
     if (sekme === "kaydedilenler") kayitliYenile();
+    if (sekme === "tarama") taramaIlkYukle();
     if (typeof PiyasaGorunumu !== "undefined") PiyasaGorunumu.gorunurluk(sekme === "haberler");
   });
 

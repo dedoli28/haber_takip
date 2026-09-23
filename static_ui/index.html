@@ -19,6 +19,7 @@
     <span class="tabs-thumb" id="tabsThumb"></span>
     <button class="tab-btn is-active" data-tab="haberler" type="button" role="tab" id="tab-haberler" aria-selected="true" aria-controls="view-haberler">Haberler</button>
     <button class="tab-btn" data-tab="kaydedilenler" type="button" role="tab" id="tab-kaydedilenler" aria-selected="false" tabindex="-1" aria-controls="view-kaydedilenler">Kaydedilenler</button>
+    <button class="tab-btn" data-tab="tarama" type="button" role="tab" id="tab-tarama" aria-selected="false" tabindex="-1" aria-controls="view-tarama">Tarama</button>
   </div>
   <div class="header-actions">
     <button class="icon-btn" id="themeToggle" type="button" title="Tema değiştir" aria-label="Tema değiştir">
@@ -215,6 +216,78 @@
     </div>
   </section>
 
+  <!-- ===================== TARAMA (screener) ===================== -->
+  <section class="view" id="view-tarama" role="tabpanel" aria-labelledby="tab-tarama">
+    <div class="control-panel control-panel-compact">
+      <div class="control-row">
+        <div class="field field-grow">
+          <input type="search" id="taramaArama" placeholder="Sembol veya şirket ara..." aria-label="Taramada ara" autocomplete="off">
+        </div>
+        <div class="field">
+          <select id="taramaEvren" aria-label="Evren"></select>
+        </div>
+
+        <div class="filter-popover-wrap">
+          <button class="btn btn-outline btn-sm" id="taramaFiltreBtn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="taramaFiltrePopover">
+            <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 5h16M7 12h10M10.5 19h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Filtreler
+            <span class="filter-badge" id="taramaFiltreRozet" style="display:none;">0</span>
+          </button>
+          <div class="filter-popover filter-popover-wide" id="taramaFiltrePopover" role="group" aria-label="Tarama filtreleri">
+            <div class="filter-popover-section">
+              <div class="filter-popover-title">Çarpanlar / Oranlar</div>
+              <div id="taramaOranFiltreleri" class="tarama-oran-filtreleri"></div>
+            </div>
+            <div class="filter-popover-section">
+              <div class="filter-popover-title">Sektör <span class="filter-popover-hint">(birden çok seçilebilir)</span></div>
+              <div class="chip-row chip-row-tight" id="taramaSektorChips" role="group" aria-label="Sektör"></div>
+            </div>
+            <div class="filter-popover-section">
+              <div class="filter-popover-title">Ülke <span class="filter-popover-hint">(birden çok seçilebilir)</span></div>
+              <div class="chip-row chip-row-tight" id="taramaUlkeChips" role="group" aria-label="Ülke"></div>
+            </div>
+            <button class="btn btn-ghost btn-sm filter-popover-clear" id="taramaFiltreTemizleBtn" type="button">Filtreleri Temizle</button>
+          </div>
+        </div>
+
+        <div class="field-spacer"></div>
+        <button class="btn btn-outline btn-sm" id="taramaYenileBtn" type="button" title="Tarama sonuçlarını yeniden getir">
+          <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18 3v4h-4M6 21v-4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Yenile
+        </button>
+        <button class="btn btn-primary btn-sm" id="taramaAnalizBtn" type="button" disabled>AI ile Yorumla</button>
+      </div>
+      <div class="active-filters" id="taramaAktifFiltreler" role="group" aria-label="Aktif tarama filtreleri" hidden></div>
+      <p class="hint status-meta" id="taramaDurumSatiri">Tarama verisi yükleniyor…</p>
+    </div>
+
+    <div class="tarama-tablo-kutusu" id="taramaTabloKutusu" aria-busy="true">
+      <div class="market-iskelet" hidden aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="market-durum" hidden></div>
+      <table class="tarama-tablo" id="taramaTablo" hidden>
+        <caption class="sr-only">Filtrelenmiş hisse tarama sonuçları</caption>
+        <thead>
+          <tr>
+            <th scope="col"><button type="button" class="tarama-th-sirala" data-alan="ticker">Sembol</button></th>
+            <th scope="col" class="tarama-th-sirket"><button type="button" class="tarama-th-sirala" data-alan="sirket">Şirket</button></th>
+            <th scope="col"><button type="button" class="tarama-th-sirala" data-alan="sektor">Sektör</button></th>
+            <th scope="col"><button type="button" class="tarama-th-sirala" data-alan="ulke">Ülke</button></th>
+            <th scope="col"><button type="button" class="tarama-th-sirala" data-alan="fiyat">Fiyat</button></th>
+            <th scope="col"><button type="button" class="tarama-th-sirala" data-alan="degisim_yuzde">Değ. %</button></th>
+            <th scope="col"><button type="button" class="tarama-th-sirala" data-alan="forward_pe">Fwd P/E</button></th>
+            <th scope="col"><button type="button" class="tarama-th-sirala" data-alan="peg">PEG</button></th>
+            <th scope="col"><button type="button" class="tarama-th-sirala" data-alan="p_fcf">P/FCF</button></th>
+            <th scope="col"><button type="button" class="tarama-th-sirala" data-alan="ev_ebitda">EV/EBITDA</button></th>
+            <th scope="col"><button type="button" class="tarama-th-sirala" data-alan="ev_ebit">EV/EBIT*</button></th>
+            <th scope="col"><button type="button" class="tarama-th-sirala" data-alan="fcf_yield">FCF Yield</button></th>
+          </tr>
+        </thead>
+        <tbody id="taramaTabloGovde"></tbody>
+      </table>
+    </div>
+    <p class="market-meta">* EV/EBIT, Finviz'de doğrudan bulunmadığı için Enterprise Value / (Satışlar × Faaliyet Marjı) ile yaklaşık hesaplanır.</p>
+  </section>
+
   <!-- ===================== KAYDEDİLENLER ===================== -->
   <section class="view" id="view-kaydedilenler" role="tabpanel" aria-labelledby="tab-kaydedilenler">
     <div class="control-panel control-panel-compact">
@@ -376,6 +449,22 @@
     </div>
     <div class="day-summary-actions" id="daySummaryActions" hidden></div>
     <p class="modal-hint day-summary-footer" id="daySummaryFooter"></p>
+  </div>
+</div>
+
+<!-- ===================== TARAMA ANALİZİ MODAL ===================== -->
+<div class="modal-overlay" id="taramaAnalizOverlay">
+  <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="taramaAnalizTitle">
+    <div class="modal-head">
+      <h3 id="taramaAnalizTitle">AI ile Yorumla</h3>
+      <button class="icon-btn" id="closeTaramaAnaliz" type="button" aria-label="Kapat">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div id="taramaAnalizBody" style="margin-top:14px;" aria-live="polite" aria-busy="false">
+      <p class="detail-summary">Yükleniyor...</p>
+    </div>
+    <div class="day-summary-actions" id="taramaAnalizActions" hidden></div>
   </div>
 </div>
 

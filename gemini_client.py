@@ -254,6 +254,58 @@ def gun_ozeti_schema_olustur() -> dict:
     }
 
 
+def tarama_analiz_prompt_olustur(hisseler: list[dict], filtre_ozeti: str) -> str:
+    satirlar = []
+    for h in hisseler[:40]:  # Gemini'ye asiri uzun liste/token gondermemek icin ust sinir
+        satirlar.append(
+            f"  {h['ticker']} ({h.get('sirket', '')}) — {h.get('sektor', '')}/{h.get('ulke', '')} | "
+            f"Forward P/E {h.get('forward_pe')}, PEG {h.get('peg')}, P/FCF {h.get('p_fcf')}, "
+            f"EV/EBITDA {h.get('ev_ebitda')}, EV/EBIT~ {h.get('ev_ebit')}, FCF Yield %{h.get('fcf_yield')}"
+        )
+    fazla_not = f"\n(Toplam {len(hisseler)} hisseden ilk 40'ı gösteriliyor.)" if len(hisseler) > 40 else ""
+
+    return f"""Sen deneyimli bir borsa/finans analistisin. Aşağıda bir hisse
+tarama (screener) aracının, şu kriterlere göre bulduğu şirketler listeleniyor:
+{filtre_ozeti}
+
+Şunu yap:
+1) Bu listedeki şirketlerde öne çıkan ORTAK TEMALARI TÜRKÇE olarak yaz
+   ("temalar" alanı, 2-4 cümle): hangi sektörler/endüstriler ağırlıkta,
+   ne tür şirketler bu kriterlere uyma eğiliminde (ör. olgun/düşük büyümeli
+   ama nakit üreten şirketler, döngüsel sektörler vb.).
+2) 2-4 şirketi öne çıkar ("dikkat_cekenler" alanı, liste): her öge
+   {{ticker, not}} olsun; "not" alanına o şirketin bu kriterlere neden uyduğunu
+   ya da rakamlarındaki dikkat çekici bir noktayı 1 cümleyle TÜRKÇE yaz.
+3) Kısa bir uyarı/temkin notu yaz ("uyari" alanı, 1-2 cümle): bu oranların tek
+   başına yeterli olmadığını, borç yükü/döngüsellik/tek seferlik kalemler gibi
+   faktörlerin de değerlendirilmesi gerektiğini ve bunun yatırım tavsiyesi
+   olmadığını TÜRKÇE belirt.
+
+Hisseler:
+{chr(10).join(satirlar)}{fazla_not}
+
+Sadece "temalar", "dikkat_cekenler" ve "uyari" alanlarını içeren JSON dön."""
+
+
+def tarama_analiz_schema_olustur() -> dict:
+    return {
+        "type": "OBJECT",
+        "properties": {
+            "temalar": {"type": "STRING"},
+            "dikkat_cekenler": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {"ticker": {"type": "STRING"}, "not": {"type": "STRING"}},
+                    "required": ["ticker", "not"],
+                },
+            },
+            "uyari": {"type": "STRING"},
+        },
+        "required": ["temalar", "dikkat_cekenler", "uyari"],
+    }
+
+
 def analiz_prompt_olustur(baslik: str, ozet: str, kaynak_ozeti: str = "") -> str:
     ek = f"\nEk bilgi: {kaynak_ozeti}" if kaynak_ozeti and kaynak_ozeti != baslik else ""
     return f"""Sen deneyimli bir borsa/finans analistisin. Aşağıdaki haberi

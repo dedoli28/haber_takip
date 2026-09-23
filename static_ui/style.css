@@ -759,3 +759,52 @@ button.alici-sil-btn:hover { background: var(--bg-input); }
 }
 
 .market-tablo-kutusu:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* =====================================================================
+   Tarama (hisse taramasi / screener)
+   ===================================================================== */
+.filter-popover-wide { width: 420px; }
+.tarama-oran-filtreleri { display: flex; flex-direction: column; gap: 10px; }
+.tarama-oran-satir { display: flex; align-items: center; gap: 8px; }
+.tarama-oran-etiket { flex: 0 0 92px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.tarama-oran-etiket abbr { text-decoration: none; border-bottom: 1px dashed var(--text-faint); cursor: help; }
+.tarama-oran-satir input[type="number"] { min-width: 0; flex: 1 1 0; text-align: right; padding: 6px 8px; }
+.tarama-oran-ayrac { color: var(--text-faint); font-size: 12px; flex-shrink: 0; }
+.tarama-oran-birim { flex: 0 0 16px; color: var(--text-faint); font-size: 12px; }
+
+.tarama-tablo-kutusu {
+  position: relative; overflow: auto; border: 1px solid var(--border-soft); border-radius: var(--radius-lg);
+  background: var(--bg-panel); min-height: 220px; max-height: calc(100vh - 260px);
+}
+.tarama-tablo { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.tarama-tablo[hidden] { display: none; }
+.tarama-tablo th, .tarama-tablo td { padding: 8px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border-soft); }
+.tarama-tablo th:first-child, .tarama-tablo td:first-child,
+.tarama-tablo th.tarama-th-sirket, .tarama-tablo td.tarama-td-sirket { text-align: left; }
+.tarama-tablo td.tarama-td-sirket { max-width: 220px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); }
+.tarama-tablo thead th { position: sticky; top: 0; background: var(--bg-panel); z-index: 1; padding: 0; }
+.tarama-th-sirala {
+  width: 100%; border: 0; background: transparent; cursor: pointer; padding: 8px 12px;
+  font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--text-muted);
+  text-align: inherit; display: flex; justify-content: flex-end; gap: 4px; align-items: center;
+}
+.tarama-tablo th:first-child .tarama-th-sirala, .tarama-tablo th.tarama-th-sirket .tarama-th-sirala { justify-content: flex-start; }
+.tarama-th-sirala:hover { color: var(--text); }
+.tarama-th-sirala.is-active { color: var(--accent); }
+.tarama-th-sirala .tarama-ok { font-size: 9px; }
+.tarama-tablo tbody tr { cursor: pointer; transition: background .12s ease; }
+.tarama-tablo tbody tr:hover, .tarama-tablo tbody tr:focus-visible { background: var(--bg-card-hover); outline: none; }
+.tarama-tablo tbody tr:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.tarama-tablo td.tarama-td-ticker { font-weight: 700; color: var(--text); }
+.tarama-uygun { color: var(--up); font-weight: 700; }
+.tarama-uygun-degil { color: var(--text-faint); }
+
+.tarama-analiz-liste { margin: 8px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.tarama-analiz-liste li { font-size: 13.5px; line-height: 1.5; color: var(--text-muted); }
+.tarama-analiz-liste li b { color: var(--text); }
+
+@media (max-width: 640px) {
+  .filter-popover-wide { width: calc(100vw - 40px); }
+  .tarama-tablo-kutusu { max-height: calc(100vh - 320px); }
+  .tarama-oran-etiket { flex-basis: 78px; font-size: 11.5px; }
+}

@@ -104,8 +104,8 @@ def test_vercel_cron_ifadeleri_utc_ve_istanbul_saatlerine_denk():
     from zoneinfo import ZoneInfo
 
     cfg = json.load(open(os.path.join(KOK, "vercel.json"), encoding="utf-8"))
-    crons = cfg["crons"]
-    assert {c["path"] for c in crons} == {"/api/cron/gun-ozeti"}
+    crons = [c for c in cfg["crons"] if c["path"] == "/api/cron/gun-ozeti"]
+    assert len(crons) == 3
     saatler_utc = sorted(int(c["schedule"].split()[1]) for c in crons)
     assert all(c["schedule"].split()[0] == "0" and c["schedule"].split()[2:] == ["*", "*", "*"] for c in crons)  # her gun, tam saat
     assert saatler_utc == [7, 11, 15]

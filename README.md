@@ -152,6 +152,38 @@ API anahtarı içermez. Başka bir sağlayıcı için `PiyasaVeriSaglayici`
 arayüzünü uygulayıp `saglayici_al()`'a eklemek ve `market_symbols.py`'ye
 o sağlayıcının sembol eşlemesini yazmak yeterlidir.
 
+## Tarama (Hisse Ekranı)
+
+Haberler'in yanında, kullanıcı isteğiyle eklenen bir **Tarama** sekmesi
+vardır: Finviz'in "Custom" ekran görünümünden (`finviz.com/screener?v=151`)
+çekilen S&P 500 / NASDAQ 100 kapsamındaki hisseler; sabit 6 çarpan/oran
+filtresi (Forward P/E 10–20, PEG 0–1, P/FCF 10–20, EV/EBITDA 8–15,
+EV/EBIT 10–18, FCF Yield %5–10 — hepsi kullanıcı tarafından değiştirilebilir),
+sektör/ülke çipleri, arama ve sıralanabilir tablo. **Finviz Elite/Pro
+gerekmez**: kullanılan sütun kimlikleri ve filtre kodları Finviz'in anonim
+(girişsiz) görünümüne canlı istekle doğrulanmıştır.
+
+- **Sağlayıcı katmanı:** `finviz_tarama.py` (HTML kazıma; `ThreadPoolExecutor`
+  ile paralel sayfalama), `tarama_servisi.py` (Redis önbellek + tek-uçuş kilit
+  + istemci tarafı filtreleme için tam veri döndürme — `haberler` panelindeki
+  desenle aynı).
+- **EV/EBIT:** Finviz'de doğrudan yoktur; `Enterprise Value / (Satışlar ×
+  Faaliyet Marjı)` ile **yaklaşık** hesaplanır (kullanıcı onayıyla). Eksik/
+  anlamsız girdide (sıfır/negatif EBIT) uydurma değer konmaz, alan `null`
+  kalır ve o filtre için hisse eşleşmez.
+- **Yenileme:** Vercel Cron, günde 2 kez × 2 evren = 4 ayrı günlük giriş
+  (Hobby planının "ifade başına günde bir" sınırına uymak için; bkz.
+  `vercel.json`). Elle tetiklemek için `POST /api/tarama-guncelle?evren=sp500`
+  (X-Poll-Secret).
+- **Uç noktalar:** `GET /api/tarama/config` (evrenler, filtre tanımları,
+  evrene göre sektör/ülke listeleri), `GET /api/tarama/sonuclar?evren=sp500`
+  (önbellekteki tüm hisseler — filtreleme tarayıcıda yapılır),
+  `POST /api/tarama/analiz` (seçili/filtrelenmiş hisseleri Gemini ile
+  yorumlar; "Analiz Et" ile aynı desende IP başına 10 dakikada 5 istekle
+  sınırlıdır).
+- **Redis anahtarları:** `htp:tarama:v1:<evren>` (hisse listesi + zaman
+  damgası, 3 gün TTL), `htp:tarama:v1:<evren>:kilit` (55 sn SET NX EX).
+
 ## Ortam değişkenleri
 
 | Değişken | Zorunlu | Açıklama |
@@ -194,6 +226,7 @@ istek yöntemini `POST` seçin.
 | `/api/cron/gun-ozeti` | **vercel.json'da tanımlı** (10:00/14:00/18:00 İstanbul) | Gün özetini üretip tarih anahtarlı kayda yazar. Harici cron kullanacaksanız `/api/gun-ozeti-olustur` (POST, X-Poll-Secret) aynı işi yapar. |
 | `/api/gun-sonu` | günde bir (ör. 23:45) | Günün özeti + bildirilmemiş haberler e-postası. |
 | `/api/sabah-ozeti` | her sabah 06:00 (İstanbul) | Gece biriken "çok önemli" haberleri e-postayla gönderir. |
+| `/api/cron/tarama` | **vercel.json'da tanımlı** (06:00/18:00 İstanbul × sp500/nasdaq100) | Finviz'den tarama verisini çeker, evren bazlı önbelleğe yazar. Harici cron kullanacaksanız `/api/tarama-guncelle?evren=sp500` (POST, X-Poll-Secret) aynı işi yapar. |
 
 `X-Poll-Secret` ile korunan diğer uç noktalar: `/api/tara`, `/api/depo-sifirla`,
 `/api/depo-tekillestir`, `/api/basarisiz-siniflandirmalari-temizle`,
@@ -206,9 +239,10 @@ istek yöntemini `POST` seçin.
 - **CORS:** yalnızca `https://haber-takip-nper.vercel.app`,
   `http://127.0.0.1:8000`, `http://localhost:8000` ve `ALLOWED_ORIGINS` ile
   eklenenlere izin verilir. İzinli başlıklar: `Content-Type`, `X-Poll-Secret`.
-- **`/api/analiz`:** herkese açık olduğu için IP başına 10 dakikada en fazla 5
-  istekle sınırlıdır (Upstash Redis `INCR` + `EXPIRE`; IP, Redis anahtarında
-  SHA-256 ile hashlenmiş olarak tutulur). Aşılırsa `429` döner.
+- **`/api/analiz` ve `/api/tarama/analiz`:** herkese açık oldukları için IP
+  başına 10 dakikada en fazla 5 istekle sınırlıdır (Upstash Redis `INCR` +
+  `EXPIRE`; IP, Redis anahtarında SHA-256 ile hashlenmiş olarak tutulur).
+  Aşılırsa `429` döner.
 - `/api/ayarlar` (bildirim e-postaları) ve `/api/durum` şu an herhangi bir
   gizli anahtar istemez.
 - E-posta gövdesindeki başlık/özet/URL değerleri HTML-kaçışlanır; arayüz

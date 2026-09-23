@@ -74,6 +74,7 @@ import gun_ozeti_servisi
 import market_data_service
 import market_symbols
 import redis_store
+import tarama_servisi
 from finviz_scraper import _saat_metnini_utc_zamanina_cevir, haber_grubu, tum_turleri_cek
 from gemini_client import (
     KATEGORI_ETIKET,
@@ -84,6 +85,8 @@ from gemini_client import (
     gun_ozeti_schema_olustur,
     siniflandirma_prompt_olustur,
     siniflandirma_schema_olustur,
+    tarama_analiz_prompt_olustur,
+    tarama_analiz_schema_olustur,
 )
 
 app = FastAPI(title="Haber Takip Platformu")
@@ -515,6 +518,137 @@ async def analiz(request: Request):
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
     return {"ok": True, "analiz": sonuc.get("analiz", "")}
+
+
+# ------------------------------------------------------------ Tarama (screener)
+TARAMA_ANALIZ_AZAMI_ISTEK = 5
+TARAMA_ANALIZ_PENCERE_SN = 10 * 60
+
+
+@app.get("/api/tarama/config")
+def tarama_config():
+    """Filtre tanimlari + evren listesi (Finviz'e hic gitmez, her zaman
+    calisir). Sektor/ulke listeleri, onbellekte veri varsa GERCEKTEN gorulen
+    degerlere gore doldurulur (sabit global liste yerine)."""
+    evren_bilgisi = []
+    for kod, ad in tarama_servisi.EVRENLER.items():
+        try:
+            sektorler, ulkeler = tarama_servisi.mevcut_sektorler_ulkeler(kod)
+        except Exception:  # noqa: BLE001
+            sektorler, ulkeler = [], []
+        evren_bilgisi.append({"kod": kod, "ad": ad, "sektorler": sektorler, "ulkeler": ulkeler})
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "evrenler": evren_bilgisi,
+            "varsayilanEvren": tarama_servisi.VARSAYILAN_EVREN,
+            "filtreler": tarama_servisi.FILTRE_TANIMLARI,
+        },
+        headers={"Cache-Control": "public, max-age=0, s-maxage=300"},
+    )
+
+
+@app.get("/api/tarama/sonuclar")
+def tarama_sonuclar(evren: str = Query(tarama_servisi.VARSAYILAN_EVREN, max_length=20)):
+    """Onbellekteki TUM hisse listesini dondurur; 6 carpan filtresi, sektor/
+    ulke ve arama istemci tarafinda uygulanir (haberlerle ayni desen).
+    Onbellek henuz doldurulmamissa (ilk cron calisana kadar) hata degil,
+    'durum':'missing' + bos liste doner."""
+    try:
+        evren = tarama_servisi.evreni_dogrula(evren)
+    except tarama_servisi.TaramaHatasi:
+        return JSONResponse({"ok": False, "kod": "gecersiz_evren", "hata": "Geçersiz evren."}, status_code=400)
+    try:
+        yanit = tarama_servisi.oku(evren)
+    except Exception:  # noqa: BLE001 - ayrinti istemciye gonderilmez
+        return JSONResponse({"ok": False, "kod": "depo_hatasi", "hata": "Tarama verisi şu anda alınamıyor."}, status_code=503)
+    return JSONResponse(yanit, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/tarama/analiz")
+async def tarama_analiz(request: Request):
+    """Istemcinin o an filtrelemis oldugu hisse listesini Gemini ile
+    yorumlar. Herkese acik ve Gemini kotasi harcadigi icin IP basina
+    sinirlanir (aynen /api/analiz gibi)."""
+    api_key = _gemini_anahtari()
+    if not api_key:
+        return JSONResponse({"ok": False, "hata": "Sunucuda GEMINI_API_KEY tanımlı değil."}, status_code=500)
+
+    body = await request.json()
+    hisseler = body.get("hisseler") or []
+    filtre_ozeti = (body.get("filtreOzeti") or "").strip()
+    if not hisseler:
+        return JSONResponse({"ok": False, "hata": "Yorumlanacak hisse bulunamadı."}, status_code=400)
+    if len(hisseler) > 200:
+        return JSONResponse({"ok": False, "hata": "Çok fazla hisse gönderildi."}, status_code=400)
+
+    ip_hash = hashlib.sha256(_istemci_ip(request).encode("utf-8")).hexdigest()[:32]
+    try:
+        siniri_asti = redis_store.istek_siniri_asildi_mi(
+            f"htp:rl:tarama_analiz:{ip_hash}", TARAMA_ANALIZ_AZAMI_ISTEK, TARAMA_ANALIZ_PENCERE_SN
+        )
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": "İstek sınırı şu an denetlenemiyor, lütfen sonra tekrar deneyin."}, status_code=503)
+    if siniri_asti:
+        return JSONResponse(
+            {
+                "ok": False,
+                "hata": f"Çok fazla analiz isteği gönderdiniz. {TARAMA_ANALIZ_PENCERE_SN // 60} dakika içinde en "
+                f"fazla {TARAMA_ANALIZ_AZAMI_ISTEK} analiz yapılabilir; lütfen biraz sonra tekrar deneyin.",
+            },
+            status_code=429,
+            headers={"Retry-After": str(TARAMA_ANALIZ_PENCERE_SN)},
+        )
+
+    prompt = tarama_analiz_prompt_olustur(hisseler, filtre_ozeti or "(kriter belirtilmedi)")
+    schema = tarama_analiz_schema_olustur()
+    try:
+        sonuc = gemini_json_iste(prompt, schema, api_key, GEMINI_MODEL)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    return {
+        "ok": True,
+        "temalar": sonuc.get("temalar", ""),
+        "dikkatCekenler": sonuc.get("dikkat_cekenler", []),
+        "uyari": sonuc.get("uyari", ""),
+    }
+
+
+def _tarama_cron_calistir(evren: str) -> JSONResponse:
+    try:
+        evren = tarama_servisi.evreni_dogrula(evren)
+    except tarama_servisi.TaramaHatasi:
+        return JSONResponse({"ok": False, "hata": "Geçersiz evren."}, status_code=400)
+    try:
+        sonuc = tarama_servisi.yenile(evren)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": "Tarama güncellenemedi."}, status_code=503, headers={"Cache-Control": "no-store"})
+    basarisiz = sonuc["sonuc"] == "hata"
+    return JSONResponse(
+        {"ok": not basarisiz, **sonuc},
+        status_code=502 if basarisiz else 200,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.get("/api/cron/tarama")
+def cron_tarama(request: Request, evren: str = Query(tarama_servisi.VARSAYILAN_EVREN, max_length=20)):
+    """Vercel Cron (vercel.json) tarafindan GET ile cagrilir; CRON_SECRET
+    (Authorization: Bearer) ya da X-Poll-Secret ile korunur."""
+    if not _cron_dogrula(request):
+        return _yetkisiz()
+    return _tarama_cron_calistir(evren)
+
+
+@app.post("/api/tarama-guncelle")
+def tarama_guncelle(request: Request, evren: str = Query(tarama_servisi.VARSAYILAN_EVREN, max_length=20)):
+    """Harici cron servisi (cron-job.org) icin: /api/cron/tarama ile ayni
+    mantik, POST + X-Poll-Secret (POLL_SECRET) ile korunur."""
+    if not _poll_secret_dogrula(request):
+        return _yetkisiz()
+    return _tarama_cron_calistir(evren)
 
 
 def _haber_istanbul_tarihi(oge: dict) -> str | None:
