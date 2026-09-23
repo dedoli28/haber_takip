@@ -1,8 +1,8 @@
 """Hisse taramasi (screener): sayi ayristirma, turetilmis oranlar (EV/EBIT,
-FCF Yield), HTML ayristirma (agdan bagimsiz - sabit ornek HTML ile), onbellek/
-filtreleme servisi ve API uclari. Finviz'e GERCEK istek atmaz (network yok);
-sutun kimlikleri app.py'nin kod incelemesi sirasinda finviz.com'a atilan
-tek-tek dogrulama istekleriyle onaylanmis, burada sabit test verisiyle
+FCF Yield), Finviz Elite CSV disa aktarma ayristirma (agdan bagimsiz - sabit
+ornek CSV ile), onbellek/filtreleme servisi ve API uclari. Finviz'e GERCEK
+istek atmaz (network yok); sutun kimlikleri ve CSV basliklari, Finviz'e
+atilan canli dogrulama istekleriyle onaylanmis, burada sabit test verisiyle
 calisilir."""
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from bs4 import BeautifulSoup
 
 import finviz_tarama as ft
 import redis_store
@@ -81,72 +80,100 @@ def test_ev_ebit_sifir_veya_negatif_operasyon_karinda_none():
     assert oge["ev_ebit"] is None
 
 
-# ------------------------------------------------------------------ HTML ayristirma (sabit ornek)
-def _ornek_satir(ticker: str, sirket: str, ekstra_deger: str = "") -> str:
-    # Gercek Finviz hucre yapisini taklit eder: "No." + ticker (logo span'i +
-    # gercek deger data-boxover-ticker'da) + geri kalan sutunlar sirayla.
-    degerler = [
-        sirket, "Technology", "Software - Application", "USA", "100.00B",
-        "15.00", "0.80", "12.00", "25.00", "150.00", "1.20%",
-        "500.00M", "NASD", "1200.00B", "10.50",
-    ]
-    if ekstra_deger:
-        degerler[-1] = ekstra_deger
-    tds = "".join(f"<td>{v}</td>" for v in degerler)
-    return f"""<tr>
-      <td>1</td>
-      <td data-boxover-ticker="{ticker}"><span class="flex"><a class="company-ticker"><span>{ticker[0]}</span></a><a class="tab-link">{ticker}</a></span></td>
-      {tds}
-    </tr>"""
+# ------------------------------------------------------------------ CSV ayristirma (sabit ornek)
+_CSV_BASLIK_SATIRI = (
+    '"No.","Ticker","Company","Sector","Industry","Country","Market Cap",'
+    '"Forward P/E","PEG","P/Free Cash Flow","Operating Margin","Price","Change",'
+    '"Sales","Exchange","Enterprise Value","EV/EBITDA"'
+)
 
 
-def _ornek_html(satirlar: str) -> BeautifulSoup:
-    basliklar = ["No.", "Ticker", "Company", "Sector", "Industry", "Country", "Market Cap",
-                 "Forward P/E", "PEG", "P/FCF", "Oper M", "Price", "Change %", "Sales",
-                 "Exchange", "Enterprise Value", "EV/EBITDA"]
-    th = "".join(f"<th>{b}</th>" for b in basliklar)
-    html = f"""<html><body><table class="screener_table"><tr>{th}</tr>{satirlar}</table></body></html>"""
-    return BeautifulSoup(html, "html.parser")
+def _ornek_csv_satiri(ticker: str, sirket: str) -> str:
+    # Gercek Finviz Elite disa aktarma satirini taklit eder (canli dogrulanmis
+    # basliklar/sira; para birimleri milyon cinsinden duz sayidir, B/M/K eki YOK).
+    return (
+        f'1,"{ticker}","{sirket}","Technology","Software - Application","USA",'
+        f'100000.00,15.00,0.80,12.00,25.00%,150.00,1.20%,500.00,"NASD",1200000.00,10.50'
+    )
 
 
-def test_sayfayi_ayristir_ticker_temiz_deger_kullanir():
-    # Duz get_text() "AAAPL" gibi bozuk bir deger uretirdi (logo span'i +
-    # gercek metin birlesir); data-boxover-ticker oznitelugi kullanilmali.
-    soup = _ornek_html(_ornek_satir("AAPL", "Apple Inc"))
-    ogeler = ft._sayfayi_ayristir(soup)
-    assert len(ogeler) == 1 and ogeler[0]["ticker"] == "AAPL"
+def _ornek_csv(satirlar: list[str]) -> str:
+    return "\n".join([_CSV_BASLIK_SATIRI, *satirlar])
 
 
-def test_sayfayi_ayristir_alanlar_dogru_eslesir():
-    soup = _ornek_html(_ornek_satir("MSFT", "Microsoft Corp"))
-    oge = ft._sayfayi_ayristir(soup)[0]
+def test_satirdan_oge_ticker_ve_alanlar_dogru_eslesir():
+    import csv
+    import io
+
+    okuyucu = csv.DictReader(io.StringIO(_ornek_csv([_ornek_csv_satiri("MSFT", "Microsoft Corp")])))
+    oge = ft._satirdan_oge(next(okuyucu))
+    assert oge["ticker"] == "MSFT"
     assert oge["sirket"] == "Microsoft Corp"
     assert oge["sektor"] == "Technology"
     assert oge["ulke"] == "USA"
-    assert oge["piyasa_degeri"] == 100_000_000_000.0
+    assert oge["piyasa_degeri"] == 100_000.0
     assert oge["forward_pe"] == 15.0
     assert oge["peg"] == 0.8
     assert oge["p_fcf"] == 12.0
     assert oge["oper_marj"] == 25.0
     assert oge["borsa"] == "NASD"
-    assert oge["enterprise_value"] == 1_200_000_000_000.0
+    assert oge["enterprise_value"] == 1_200_000.0
     assert oge["ev_ebitda"] == 10.5
     # turetilmis alanlar da satir ayristirmasinda otomatik hesaplanir
     assert oge["fcf_yield"] == round(100 / 12.0, 4)
     assert oge["ev_ebit"] is not None
 
 
-def test_sayfayi_ayristir_birden_fazla_satir_ve_eksik_ticker_atlanir():
-    satirlar = _ornek_satir("AAPL", "Apple") + _ornek_satir("MSFT", "Microsoft")
-    soup = _ornek_html(satirlar)
-    ogeler = ft._sayfayi_ayristir(soup)
-    assert [o["ticker"] for o in ogeler] == ["AAPL", "MSFT"]
+def test_satirdan_oge_bos_hucre_none_doner():
+    # CSV'de eksik deger bos hucre olarak gelir (ör: "...,,,12.00,..." - Forward
+    # P/E ve PEG bos), "-" degil.
+    import csv
+    import io
+
+    satir = (
+        '1,"ZZZ","Zeta Inc","Technology","Software - Application","USA",'
+        '100000.00,,,12.00,25.00%,150.00,1.20%,500.00,"NASD",1200000.00,10.50'
+    )
+    okuyucu = csv.DictReader(io.StringIO(_ornek_csv([satir])))
+    oge = ft._satirdan_oge(next(okuyucu))
+    assert oge["forward_pe"] is None and oge["peg"] is None
 
 
-def test_sayfayi_ayristir_tablo_yoksa_hata():
-    soup = BeautifulSoup("<html><body>bos</body></html>", "html.parser")
-    with pytest.raises(RuntimeError):
-        ft._sayfayi_ayristir(soup)
+def test_satirdan_oge_ticker_yoksa_none():
+    import csv
+    import io
+
+    satir = _ornek_csv_satiri("X", "X Inc").replace('"X"', '""', 1)
+    okuyucu = csv.DictReader(io.StringIO(_ornek_csv([satir])))
+    assert ft._satirdan_oge(next(okuyucu)) is None
+
+
+def test_auth_token_tanimli_degilse_hata(monkeypatch):
+    monkeypatch.delenv("FINVIZ_AUTH_TOKEN", raising=False)
+    with pytest.raises(ft.FinvizYapilandirmaHatasi):
+        ft._auth_token()
+
+
+def test_tarama_verisi_cek_uctan_uca_csv_ayristirir_ve_tekillestirir(monkeypatch):
+    monkeypatch.setenv("FINVIZ_AUTH_TOKEN", "test-token")
+
+    class SahteYanit:
+        status_code = 200
+        text = _ornek_csv([_ornek_csv_satiri("AAPL", "Apple Inc"), _ornek_csv_satiri("AAPL", "Apple Inc")])
+
+        def raise_for_status(self):
+            pass
+
+    class SahteIstemci:
+        def get(self, url, params=None, timeout=None):
+            assert params["auth"] == "test-token"
+            assert url == ft.TARAMA_URL
+            return SahteYanit()
+
+    monkeypatch.setattr(ft, "_istemci", lambda: SahteIstemci())
+    hisseler, hatalar = ft.tarama_verisi_cek("sp500")
+    assert hatalar == []
+    assert [h["ticker"] for h in hisseler] == ["AAPL"]  # tekrarlanan satir tekillestirilir
 
 
 def test_vercel_cron_tarama_girisleri_gunde_bir_hobby_uyumlu():

@@ -155,18 +155,28 @@ o sağlayıcının sembol eşlemesini yazmak yeterlidir.
 ## Tarama (Hisse Ekranı)
 
 Haberler'in yanında, kullanıcı isteğiyle eklenen bir **Tarama** sekmesi
-vardır: Finviz'in "Custom" ekran görünümünden (`finviz.com/screener?v=151`)
+vardır: Finviz Elite'in resmi Tarayıcı API'sinden (CSV dışa aktarma)
 çekilen S&P 500 / NASDAQ 100 kapsamındaki hisseler; sabit 6 çarpan/oran
 filtresi (Forward P/E 10–20, PEG 0–1, P/FCF 10–20, EV/EBITDA 8–15,
 EV/EBIT 10–18, FCF Yield %5–10 — hepsi kullanıcı tarafından değiştirilebilir),
-sektör/ülke çipleri, arama ve sıralanabilir tablo. **Finviz Elite/Pro
-gerekmez**: kullanılan sütun kimlikleri ve filtre kodları Finviz'in anonim
-(girişsiz) görünümüne canlı istekle doğrulanmıştır.
+sektör/ülke çipleri, arama ve sıralanabilir tablo.
 
-- **Sağlayıcı katmanı:** `finviz_tarama.py` (HTML kazıma; `ThreadPoolExecutor`
-  ile paralel sayfalama), `tarama_servisi.py` (Redis önbellek + tek-uçuş kilit
-  + istemci tarafı filtreleme için tam veri döndürme — `haberler` panelindeki
-  desenle aynı).
+**Finviz Elite hesabı GEREKİR** (`FINVIZ_AUTH_TOKEN`, aşağıda). İlk sürüm
+Finviz'in anonim (girişsiz) HTML görünümünü kazıyordu ve geliştirme
+ortamında sorunsuz çalıştı, ama **canlıda (Vercel) Finviz'in Cloudflare
+koruması sunucu IP'sine 403 + JS meydan okuması ("Just a moment...")
+döndürdü** — `cloudscraper` ile bile aşılamadı. Finviz Elite'in resmi
+dışa aktarma uç noktası (`elite.finviz.com/export/screener`, kişisel bir
+`auth` token'ıyla) bu korumadan etkilenmedi ve ayrıca tüm evreni tek
+istekte (sayfalama olmadan) döndürüyor. Token, Finviz'de **Tarama →
+Tarayıcı API'si** sayfasındaki "API Belirteci Oluştur" ile alınır.
+
+- **Sağlayıcı katmanı:** `finviz_tarama.py` (Finviz Elite CSV dışa aktarma
+  uç noktasından tek istekte tüm evreni çeker, `csv` modülüyle ayrıştırır;
+  `cloudscraper` — Cloudflare JS meydan okumasına karşı ek güvenlik payı,
+  bu uç noktada gerekmiyor ama zararı yok), `tarama_servisi.py` (Redis
+  önbellek + tek-uçuş kilit + istemci tarafı filtreleme için tam veri
+  döndürme — `haberler` panelindeki desenle aynı).
 - **EV/EBIT:** Finviz'de doğrudan yoktur; `Enterprise Value / (Satışlar ×
   Faaliyet Marjı)` ile **yaklaşık** hesaplanır (kullanıcı onayıyla). Eksik/
   anlamsız girdide (sıfır/negatif EBIT) uydurma değer konmaz, alan `null`
@@ -201,6 +211,7 @@ gerekmez**: kullanılan sütun kimlikleri ve filtre kodları Finviz'in anonim
 | `MARKET_DATA_API_KEY` | piyasa grafikleri için | Sağlayıcı API anahtarı; yalnızca sunucuda okunur, istemciye asla gönderilmez. |
 | `MARKET_DATA_MAX_CALLS_PER_MIN` | hayır | Dakikada azami sağlayıcı çağrısı (varsayılan 6). |
 | `MARKET_DATA_ALLOW_MOCK` | hayır | YALNIZCA geliştirme: `MARKET_DATA_PROVIDER=mock` ile sahte seri. Vercel production'da etkinleşmez. |
+| `FINVIZ_AUTH_TOKEN` | Tarama sekmesi için | Finviz Elite hesabının kişisel dışa aktarma token'ı (Finviz'de *Tarama → Tarayıcı API'si → API Belirteci Oluştur*). **Tanımlı değilse tarama hiç güncellenmez** (cron/manuel tetikleme "hata" döner; sekme kendisi etkilenmez, yalnızca "veri yok" gösterir). |
 
 Gizli değerleri (API anahtarı, token, secret) asla koda veya repoya yazmayın;
 Vercel'de *Project → Settings → Environment Variables* bölümünden girin.
