@@ -733,7 +733,13 @@ button.alici-sil-btn:hover { background: var(--bg-input); }
   #marketUlkeSekmeleri .market-sekme { min-height: 44px; }
   .filter-tag { min-height: 44px; }
   button.alici-sil-btn { min-width: 44px; min-height: 44px; }
-  .header-actions #openSettings { width: 44px; height: 44px; min-width: 44px; }
+  /* max-width:640px'te .btn-label zaten gizlenir; ama bu kural (pointer:coarse)
+     ile GENİŞ dokunmatik ekranlarda (ör. dokunmatik dizüstü) da TEK BAŞINA
+     tetiklenebiliyor ve orada metin gizlenmeden 44px'lik kareye sıkışıp taşıyordu. */
+  .header-actions #openSettings {
+    width: 44px; height: 44px; min-width: 44px; padding: 0; gap: 0; justify-content: center;
+  }
+  .header-actions #openSettings .btn-label { display: none; }
 }
 
 /* ---------- Azaltılmış hareket ---------- */
