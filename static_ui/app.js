@@ -6,6 +6,10 @@ const SON_GUN_OZETI_KEY = "son_gun_ozeti_v1";
 const OTOMATIK_YENILEME_MS = 60 * 1000; // arka plandaki gercek tarama sunucuda (cron) calisir; burada sadece depoyu tazeleriz
 const HABER_ISTEK_ZAMAN_ASIMI_MS = 20 * 1000;
 const TARAMA_GECIKME_UYARISI_DK = 45;
+// Sunucuda Gemini cagrisi tek basina 2 deneme x 20 sn + baglam olusturma
+// surebilir; istemci zaman asimi bunu asacak kadar cok (55 sn) tutulur ki
+// yavas ama basarili bir yanit erken kesilmesin.
+const SOHBET_ISTEK_ZAMAN_ASIMI_MS = 55 * 1000;
 
 const SINIF_ETIKET = {
   cok_onemli: "Çok Önemli",
@@ -2299,11 +2303,14 @@ function aiSohbetPaneliOlustur(kayitliYenile) {
     gonderBtn.disabled = true;
     ciz();
 
+    const ac = new AbortController();
+    const zaman = setTimeout(() => ac.abort(), SOHBET_ISTEK_ZAMAN_ASIMI_MS);
     try {
       const resp = await fetch("/api/sohbet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mesajlar: state.mesajlar.map((m) => ({ rol: m.rol, metin: m.metin })) }),
+        signal: ac.signal,
       });
       let yanit = null;
       try { yanit = await resp.json(); } catch (err) { yanit = null; }
@@ -2316,9 +2323,14 @@ function aiSohbetPaneliOlustur(kayitliYenile) {
         state.mesajlar.push({ rol: "asistan", metin: yanit.yanit || "" });
       }
     } catch (err) {
-      state.mesajlar.push({ rol: "asistan", metin: "Bağlantı kurulamadı. Lütfen tekrar deneyin.", hata: true });
-      toast("Bağlantı kurulamadı.", "error");
+      const zamanAsimi = err && err.name === "AbortError";
+      const mesaj = zamanAsimi
+        ? "Yanıt beklenenden uzun sürdü. Lütfen tekrar deneyin."
+        : "Bağlantı kurulamadı. Lütfen tekrar deneyin.";
+      state.mesajlar.push({ rol: "asistan", metin: mesaj, hata: true });
+      toast(mesaj, "error");
     } finally {
+      clearTimeout(zaman);
       state.gonderiliyor = false;
       gonderBtn.disabled = false;
       ciz();

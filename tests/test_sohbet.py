@@ -48,7 +48,7 @@ def test_guncel_haberler_azami_siniri_asmaz(monkeypatch):
     assert len(sohbet_baglami._guncel_haberler()) == sohbet_baglami.AZAMI_HABER
 
 
-# ------------------------------------------------------------------ _bahsedilen_hisseler
+# ------------------------------------------------------------------ ticker adayi tespiti
 def _hisse(ticker, **kw):
     taban = {"ticker": ticker, "sirket": f"{ticker} Inc", "sektor": "Technology", "fiyat": 100.0,
               "degisim_yuzde": 1.0, "forward_pe": 15.0, "peg": 0.8, "p_fcf": 12.0,
@@ -57,28 +57,38 @@ def _hisse(ticker, **kw):
     return taban
 
 
-def test_bahsedilen_hisseler_mesajda_gecen_tickeri_bulur(monkeypatch):
-    monkeypatch.setattr(ts, "oku", lambda evren: {"hisseler": [_hisse("AAPL"), _hisse("MSFT")]} if evren == "sp500" else {"hisseler": []})
-    sonuc = sohbet_baglami._bahsedilen_hisseler("aapl nasıl gidiyor bugün")
-    assert [h["ticker"] for h in sonuc] == ["AAPL"]
+def test_ticker_deseni_kucuk_harfli_normal_kelimelerle_eslesmez():
+    # Regresyon: eski desen ([A-Za-z]{1,5}) neredeyse her Turkce cumledeki
+    # sozcukle eslesip her mesajda gereksiz 2 ekstra Redis okumasina (ve
+    # gecikme/zaman asimi riskine) yol aciyordu. Yalnizca BUYUK harfle
+    # yazilmis 2-5 harfli kelimeler aday sayilmali.
+    assert sohbet_baglami._TICKER_ADAYI_DESENI.findall("bugün önemli ne var, kısaca özetler misin?") == []
+    assert sohbet_baglami._TICKER_ADAYI_DESENI.findall("aapl nasıl gidiyor bugün") == []
 
 
-def test_bahsedilen_hisseler_eslesme_yoksa_bos(monkeypatch):
-    monkeypatch.setattr(ts, "oku", lambda evren: {"hisseler": [_hisse("AAPL")]})
-    assert sohbet_baglami._bahsedilen_hisseler("bugün hava nasıl") == []
+def test_ticker_deseni_buyuk_harfli_kelimeyi_yakalar():
+    assert sohbet_baglami._TICKER_ADAYI_DESENI.findall("AAPL nasıl gidiyor bugün") == ["AAPL"]
 
 
-def test_bahsedilen_hisseler_iki_evrende_tekrar_etmez(monkeypatch):
-    monkeypatch.setattr(ts, "oku", lambda evren: {"hisseler": [_hisse("AAPL")]})
-    sonuc = sohbet_baglami._bahsedilen_hisseler("AAPL AAPL")
-    assert len(sonuc) == 1
-
-
-def test_bahsedilen_hisseler_tarama_hatasinda_atlanir(monkeypatch):
+def test_evren_hisseleri_guvenli_hatada_bos_liste(monkeypatch):
     def patlar(evren):
         raise RuntimeError("onbellek yok")
     monkeypatch.setattr(ts, "oku", patlar)
-    assert sohbet_baglami._bahsedilen_hisseler("AAPL") == []
+    assert sohbet_baglami._evren_hisseleri_guvenli("sp500") == []
+
+
+def test_hisseleri_esle_eslesen_tickeri_bulur():
+    sonuc = sohbet_baglami._hisseleri_esle({"AAPL"}, [[_hisse("AAPL"), _hisse("MSFT")], []])
+    assert [h["ticker"] for h in sonuc] == ["AAPL"]
+
+
+def test_hisseleri_esle_iki_evrende_tekrar_etmez():
+    sonuc = sohbet_baglami._hisseleri_esle({"AAPL"}, [[_hisse("AAPL")], [_hisse("AAPL")]])
+    assert len(sonuc) == 1
+
+
+def test_hisseleri_esle_eslesme_yoksa_bos():
+    assert sohbet_baglami._hisseleri_esle({"ZZZZZ"}, [[_hisse("AAPL")]]) == []
 
 
 # ------------------------------------------------------------------ baglam_olustur

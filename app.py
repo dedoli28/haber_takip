@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import os
 import re
 import time
@@ -93,6 +94,7 @@ from gemini_client import (
 )
 
 app = FastAPI(title="Piyasa Pusulası")
+log = logging.getLogger("app")
 
 # CORS: yalnizca bilinen originlere izin verilir (arayuz zaten ayni originden
 # servis edildigi icin normal kullanimda CORS gerekmez). Ek originler
@@ -674,8 +676,9 @@ async def sohbet(request: Request):
     prompt = sohbet_prompt_olustur(mesajlar, baglam)
     schema = sohbet_schema_olustur()
     try:
-        sonuc = gemini_json_iste(prompt, schema, api_key, GEMINI_MODEL, timeout=15)
+        sonuc = gemini_json_iste(prompt, schema, api_key, GEMINI_MODEL, timeout=20)
     except Exception as e:  # noqa: BLE001
+        log.warning("sohbet basarisiz: %s: %s", type(e).__name__, e)
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
     return {"ok": True, "yanit": sonuc.get("yanit", "")}

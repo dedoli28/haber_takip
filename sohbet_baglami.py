@@ -7,6 +7,7 @@ onbellek okuma fonksiyonlarini kullanir)."""
 
 from __future__ import annotations
 
+import concurrent.futures
 import re
 
 import gun_ozeti_servisi
@@ -16,7 +17,15 @@ import tarama_servisi
 AZAMI_HABER = 12
 AZAMI_HISSE = 5
 _ONEM_SIRA = {"cok_onemli": 0, "onemli": 1, "bakmaya_deger": 2, "onemsiz": 3}
-_TICKER_ADAYI_DESENI = re.compile(r"[A-Za-z]{1,5}")
+# BUYUK harfle yazilmis 2-5 harfli kelimeler (ör. "AAPL nasil?"). Kucuk/karisik
+# harfli her kelimeyi eslesen eski desen ([A-Za-z]{1,5}) neredeyse HER mesajda
+# tetikleniyordu (Turkce cumlelerdeki sıradan kelimeler bile eslesiyordu),
+# bu da her sohbet mesajinda gereksiz 2 ekstra Redis okumasina (sp500 +
+# nasdaq100) yol aciyor, toplam gecikmeyi artirip zaman asimi riskini
+# yukseltiyordu. Kullanicinin GERCEKTEN BUYUK harfle yazdigi kisa kelimeler
+# (borsa ticker'lari yazilirken dogal olarak buyuk harf kullanilir) cok daha
+# az yanlis pozitif uretir.
+_TICKER_ADAYI_DESENI = re.compile(r"\b[A-Z]{2,5}\b")
 
 
 def _guncel_haberler() -> list[dict]:
@@ -29,23 +38,18 @@ def _guncel_haberler() -> list[dict]:
     return ogeler[:AZAMI_HABER]
 
 
-def _bahsedilen_hisseler(mesaj: str) -> list[dict]:
-    """Mesajda gecen 1-5 harfli kelimeleri (buyuk/kucuk harf farketmez) olasi
-    ticker sayar ve S&P 500 / NASDAQ 100 tarama onbelleginde arar. Gercek bir
-    hisse eslesmedigi surece hicbir sey eklenmez (yanlis pozitif zararsizdir:
-    Turkce bir kelime tesadufen bir ticker'a esit olsa bile yalnizca o hisse
-    GERCEKTEN mevcut evrende varsa baglama girer)."""
-    adaylar = {t.upper() for t in _TICKER_ADAYI_DESENI.findall(mesaj)}
-    if not adaylar:
+def _evren_hisseleri_guvenli(evren: str) -> list[dict]:
+    try:
+        return tarama_servisi.oku(evren).get("hisseler", [])
+    except Exception:  # noqa: BLE001
         return []
+
+
+def _hisseleri_esle(adaylar: set[str], evren_sonuclari: list[list[dict]]) -> list[dict]:
     bulunanlar: list[dict] = []
     gorulen: set[str] = set()
-    for evren in ("sp500", "nasdaq100"):
-        try:
-            veri = tarama_servisi.oku(evren)
-        except Exception:  # noqa: BLE001
-            continue
-        for h in veri.get("hisseler", []):
+    for hisseler in evren_sonuclari:
+        for h in hisseler:
             ticker = h.get("ticker")
             if ticker in adaylar and ticker not in gorulen:
                 gorulen.add(ticker)
@@ -75,24 +79,38 @@ def _hisse_satiri(h: dict) -> str:
     )
 
 
+def _gun_ozeti_guvenli() -> dict | None:
+    try:
+        return gun_ozeti_servisi.bugunun_hazir_ozeti()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def baglam_olustur(mesaj: str) -> str:
     """Sohbet promptuna eklenecek, sunucuda ZATEN onbellekte olan platform
     verisinin kisa Turkce ozeti. Hicbir veri yoksa bunu acikca belirtir
-    (boylece model 'veri yok' demek yerine uydurmaz)."""
-    parcalar: list[str] = []
+    (boylece model 'veri yok' demek yerine uydurmaz).
 
-    try:
-        ozet = gun_ozeti_servisi.bugunun_hazir_ozeti()
-    except Exception:  # noqa: BLE001
-        ozet = None
+    Kaynaklar (gun ozeti + haberler + evren basina tarama) birbirinden
+    BAGIMSIZ Redis okumalaridir; sirayla cagirmak gecikmeleri toplardi (ve
+    Vercel'in fonksiyon zaman asimina yaklastirirdi). Paralel calistirilarak
+    toplam gecikme, TEK EN YAVAS cagriya indirilir."""
+    adaylar = set(_TICKER_ADAYI_DESENI.findall(mesaj))
+    evrenler = ("sp500", "nasdaq100") if adaylar else ()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2 + len(evrenler)) as executor:
+        gelecek_ozet = executor.submit(_gun_ozeti_guvenli)
+        gelecek_haberler = executor.submit(_guncel_haberler)
+        gelecek_hisseler = [executor.submit(_evren_hisseleri_guvenli, e) for e in evrenler]
+        ozet = gelecek_ozet.result()
+        haberler = gelecek_haberler.result()
+        hisseler = _hisseleri_esle(adaylar, [g.result() for g in gelecek_hisseler]) if adaylar else []
+
+    parcalar: list[str] = []
     if ozet and ozet.get("genelOzet"):
         parcalar.append(f"Bugünün genel piyasa özeti: {ozet['genelOzet']}")
-
-    haberler = _guncel_haberler()
     if haberler:
         parcalar.append("Güncel/önemli haberler:\n" + "\n".join(_haber_satiri(h) for h in haberler))
-
-    hisseler = _bahsedilen_hisseler(mesaj)
     if hisseler:
         parcalar.append(
             "Mesajda geçen ve platformun tarama (screener) verisinde bulunan hisseler:\n"
