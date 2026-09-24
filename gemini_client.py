@@ -331,3 +331,43 @@ def analiz_schema_olustur() -> dict:
         "properties": {"analiz": {"type": "STRING"}},
         "required": ["analiz"],
     }
+
+
+def sohbet_prompt_olustur(mesajlar: list[dict], baglam: str) -> str:
+    """mesajlar: [{'rol': 'kullanici'|'asistan', 'metin': str}, ...] - sondaki
+    'kullanici' mesajı yanıtlanacak son mesajdır. Gemini'nin çok turlu
+    (multi-turn) 'contents' API'si yerine tek bir prompt metninde düz
+    transkript kullanılır (diğer tüm Gemini çağrıları da bu projede aynı
+    tek-prompt deseniyle çalışır, bkz. gemini_json_iste)."""
+    gecmis = "\n".join(
+        f"{'Kullanıcı' if m['rol'] == 'kullanici' else 'Asistan'}: {m['metin']}" for m in mesajlar[:-1]
+    )
+    son_mesaj = mesajlar[-1]["metin"]
+    return f"""Sen "Piyasa Pusulası" adlı bir haber/piyasa takip platformunun
+Türkçe konuşan yapay zeka asistanısın. Kullanıcıyla doğal bir sohbet
+sürdürüyorsun ve aşağıda platformun GÜNCEL verisine (haberler, tarama
+sonuçları) erişimin var.
+
+KURALLAR:
+- Yalnızca aşağıdaki platform verisine ve genel bilgine dayan; olmayan bir
+  haberi, fiyatı ya da oranı ASLA uydurma. Sorulan bir hisse/konu platform
+  verisinde yoksa bunu açıkça söyle.
+- Kısa ve öz yanıtla (genelde 2-5 cümle; gerekiyorsa kısa madde listesi).
+- Yatırım tavsiyesi verme; somut bir alım/satım önerisi istenirse bunun
+  yatırım tavsiyesi olmadığını, eğitim/bilgi amaçlı olduğunu belirt.
+
+=== Platform Verisi ===
+{baglam}
+=== Platform Verisi Sonu ===
+
+{f"Önceki konuşma:\n{gecmis}\n\n" if gecmis else ""}Kullanıcının son mesajı: {son_mesaj}
+
+Yukarıdaki son mesaja yanıt ver. Sadece "yanit" alanını içeren JSON dön."""
+
+
+def sohbet_schema_olustur() -> dict:
+    return {
+        "type": "OBJECT",
+        "properties": {"yanit": {"type": "STRING"}},
+        "required": ["yanit"],
+    }

@@ -515,18 +515,28 @@ function kaydedilenleriYukle() {
 function kaydedilenleriKaydet(liste) {
   try { localStorage.setItem(KAYDEDILEN_KEY, JSON.stringify(liste)); } catch (e) { toast("Tarayıcı depolaması kullanılamıyor; kayıt yapılamadı.", "error"); }
 }
-function kayitliMi(url) {
-  return kaydedilenleriYukle().some((o) => o.url === url);
+
+// Haber kayıtları (geriye dönük uyumluluk) kendi url'iyle anahtarlanır; yeni
+// türler (hisse/sohbet) kendi .anahtar alanlarını taşır. Böylece tarayıcıda
+// zaten kayıtlı eski (yalnızca haber) veriler .anahtar alanı olmadan da
+// çalışmaya devam eder.
+function ogeAnahtari(oge) { return oge.anahtar || oge.url; }
+function hisseAnahtari(ticker) { return `hisse:${ticker}`; }
+function sohbetAnahtari(id) { return `sohbet:${id}`; }
+
+function kayitliMi(anahtar) {
+  return kaydedilenleriYukle().some((o) => ogeAnahtari(o) === anahtar);
 }
 function kaydedilenEkleGuncelle(oge) {
+  const anahtar = ogeAnahtari(oge);
   const liste = kaydedilenleriYukle();
-  const idx = liste.findIndex((o) => o.url === oge.url);
+  const idx = liste.findIndex((o) => ogeAnahtari(o) === anahtar);
   const kayit = { ...oge, kaydedilmeTarihi: new Date().toISOString() };
   if (idx >= 0) liste[idx] = kayit; else liste.unshift(kayit);
   kaydedilenleriKaydet(liste);
 }
-function kaydedilenKaldir(url) {
-  kaydedilenleriKaydet(kaydedilenleriYukle().filter((o) => o.url !== url));
+function kaydedilenKaldir(anahtar) {
+  kaydedilenleriKaydet(kaydedilenleriYukle().filter((o) => ogeAnahtari(o) !== anahtar));
 }
 
 /* ===================== Detay modal (haber/kayıtlı ortak) ===================== */
@@ -1361,9 +1371,127 @@ function haberPaneliOlustur() {
 }
 
 /* ===================== Kaydedilenler paneli ===================== */
+function kayitliKaldirButonuOlustur(oge, kaldirilinca) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "kayitli-kaldir-btn";
+  b.setAttribute("aria-label", "Kaydı kaldır");
+  b.textContent = "✕";
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    kaydedilenKaldir(ogeAnahtari(oge));
+    kaldirilinca();
+    toast("Kaydedilenlerden kaldırıldı.", "ok");
+  });
+  return b;
+}
+
+function hisseKartiOlustur(oge, index, kaldirilinca) {
+  const kart = document.createElement("div");
+  kart.className = "item-card c-hisse";
+  kart.style.animationDelay = `${Math.min(index * 25, 300)}ms`;
+  kart.tabIndex = 0;
+  kart.setAttribute("role", "button");
+
+  const serit = document.createElement("div");
+  serit.className = "item-stripe";
+  kart.appendChild(serit);
+
+  const govde = document.createElement("div");
+  govde.className = "item-body";
+
+  const ustSatir = document.createElement("div");
+  ustSatir.className = "item-meta-row";
+  const rozet = document.createElement("span");
+  rozet.className = "badge kayitli-hisse-rozet";
+  rozet.textContent = oge.ticker || "";
+  ustSatir.appendChild(rozet);
+  if (oge.degisim_yuzde != null) {
+    const deg = document.createElement("span");
+    deg.className = "meta-text " + (oge.degisim_yuzde >= 0 ? "up" : "down");
+    deg.textContent = `${oge.degisim_yuzde > 0 ? "+" : ""}${taramaSayiGoster(oge.degisim_yuzde, 2, "%")}`;
+    ustSatir.appendChild(deg);
+  }
+  govde.appendChild(ustSatir);
+
+  const baslik = document.createElement("p");
+  baslik.className = "item-title";
+  baslik.textContent = oge.sirket || oge.ticker || "";
+  govde.appendChild(baslik);
+
+  const ozet = document.createElement("p");
+  ozet.className = "item-summary";
+  const parcalar = [];
+  if (oge.sektor) parcalar.push(oge.sektor);
+  if (oge.fiyat != null) parcalar.push(`Fiyat ${taramaSayiGoster(oge.fiyat, 2, " $")}`);
+  if (oge.forward_pe != null) parcalar.push(`Fwd P/E ${taramaSayiGoster(oge.forward_pe)}`);
+  if (oge.peg != null) parcalar.push(`PEG ${taramaSayiGoster(oge.peg)}`);
+  ozet.textContent = parcalar.join(" · ");
+  govde.appendChild(ozet);
+
+  kart.appendChild(govde);
+  kart.appendChild(kayitliKaldirButonuOlustur(oge, kaldirilinca));
+
+  const ac = () => window.open(`https://finviz.com/quote.ashx?t=${encodeURIComponent(oge.ticker)}`, "_blank", "noopener");
+  kart.addEventListener("click", ac);
+  kart.addEventListener("keydown", (e) => {
+    if (e.target !== kart) return;
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); ac(); }
+  });
+  return kart;
+}
+
+function sohbetKartiOlustur(oge, index, kaldirilinca) {
+  const kart = document.createElement("div");
+  kart.className = "item-card c-sohbet";
+  kart.style.animationDelay = `${Math.min(index * 25, 300)}ms`;
+  kart.tabIndex = 0;
+  kart.setAttribute("role", "button");
+
+  const serit = document.createElement("div");
+  serit.className = "item-stripe";
+  kart.appendChild(serit);
+
+  const govde = document.createElement("div");
+  govde.className = "item-body";
+
+  const ustSatir = document.createElement("div");
+  ustSatir.className = "item-meta-row";
+  const rozet = document.createElement("span");
+  rozet.className = "badge kayitli-sohbet-rozet";
+  rozet.textContent = "Sohbet";
+  ustSatir.appendChild(rozet);
+  const meta = document.createElement("span");
+  meta.className = "meta-text";
+  const tarih = oge.kaydedilmeTarihi ? new Date(oge.kaydedilmeTarihi) : null;
+  meta.textContent = [tarih && !isNaN(tarih.getTime()) ? kisaZaman(tarih) : "", `${(oge.mesajlar || []).length} mesaj`]
+    .filter(Boolean).join(" · ");
+  ustSatir.appendChild(meta);
+  govde.appendChild(ustSatir);
+
+  const ilkMesaj = (oge.mesajlar || []).find((m) => m.rol === "kullanici");
+  const baslik = document.createElement("p");
+  baslik.className = "item-title";
+  baslik.textContent = oge.baslik || (ilkMesaj ? ilkMesaj.metin : "Sohbet");
+  govde.appendChild(baslik);
+
+  kart.appendChild(govde);
+  kart.appendChild(kayitliKaldirButonuOlustur(oge, kaldirilinca));
+
+  kart.addEventListener("click", () => sohbetGoruntule(oge));
+  kart.addEventListener("keydown", (e) => {
+    if (e.target !== kart) return;
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sohbetGoruntule(oge); }
+  });
+  return kart;
+}
+
 function kayitliPaneliOlustur() {
   const state = { arama: "" };
 
+  const tur = tekliSecimGrubuBaslat(
+    document.querySelectorAll("#kayitliTurChips .chip"), "tur", () => { rozetGuncelle(); ciz(); }
+  );
   const kategori = cokluSecimGrubuBaslat(
     document.querySelectorAll("#kayitliKategoriChips .chip"), "kategori", () => { rozetGuncelle(); ciz(); }
   );
@@ -1377,10 +1505,14 @@ function kayitliPaneliOlustur() {
   filtrePopoverBaslat("kayitliFiltreBtn", "kayitliFiltrePopover");
 
   function rozetGuncelle() {
-    filtreRozetGuncelle("kayitliFiltreRozet", kategori.secili.size + ulke.secili.size + sinif.secili.size);
+    filtreRozetGuncelle(
+      "kayitliFiltreRozet",
+      (tur.durum.deger ? 1 : 0) + kategori.secili.size + ulke.secili.size + sinif.secili.size
+    );
   }
 
   function filtreleriTemizle() {
+    tur.temizle();
     kategori.temizle();
     ulke.temizle();
     sinif.temizle();
@@ -1391,23 +1523,37 @@ function kayitliPaneliOlustur() {
 
   const aramaInput = $("kayitliArama");
 
+  function ogeTuru(o) { return o.tur || "haber"; }
+
+  function aramaEslesiyorMu(o, q) {
+    const t = ogeTuru(o);
+    if (t === "hisse") return (o.ticker || "").toLowerCase().includes(q) || (o.sirket || "").toLowerCase().includes(q);
+    if (t === "sohbet") {
+      if ((o.baslik || "").toLowerCase().includes(q)) return true;
+      return (o.mesajlar || []).some((m) => (m.metin || "").toLowerCase().includes(q));
+    }
+    return (
+      (o.baslikTr || "").toLowerCase().includes(q) ||
+      (o.baslik || "").toLowerCase().includes(q) ||
+      (o.ai_ozet || "").toLowerCase().includes(q)
+    );
+  }
+
   function ciz() {
     const liste = kaydedilenleriYukle();
     const kutu = $("kayitliListe");
     kutu.innerHTML = "";
 
     let gorulen = liste;
-    if (sinif.secili.size > 0) gorulen = gorulen.filter((h) => sinif.secili.has(h.sinif));
-    if (kategori.secili.size > 0) gorulen = gorulen.filter((h) => kategori.secili.has(h.kategori));
-    if (ulke.secili.size > 0) gorulen = gorulen.filter((h) => ulke.secili.has(ulkeKodu(h)));
+    if (tur.durum.deger) gorulen = gorulen.filter((o) => ogeTuru(o) === tur.durum.deger);
+    // Haber-özel filtreler (önem/tür/ülke) yalnızca haber türündeki kayıtları etkiler;
+    // hisse/sohbet kayıtları bu filtrelerden bağımsız olarak listede kalır.
+    if (sinif.secili.size > 0) gorulen = gorulen.filter((o) => ogeTuru(o) !== "haber" || sinif.secili.has(o.sinif));
+    if (kategori.secili.size > 0) gorulen = gorulen.filter((o) => ogeTuru(o) !== "haber" || kategori.secili.has(o.kategori));
+    if (ulke.secili.size > 0) gorulen = gorulen.filter((o) => ogeTuru(o) !== "haber" || ulke.secili.has(ulkeKodu(o)));
     if (state.arama) {
       const q = state.arama.toLowerCase();
-      gorulen = gorulen.filter(
-        (h) =>
-          (h.baslikTr || "").toLowerCase().includes(q) ||
-          (h.baslik || "").toLowerCase().includes(q) ||
-          (h.ai_ozet || "").toLowerCase().includes(q)
-      );
+      gorulen = gorulen.filter((o) => aramaEslesiyorMu(o, q));
     }
 
     if (gorulen.length === 0) {
@@ -1416,11 +1562,16 @@ function kayitliPaneliOlustur() {
           { metin: "Filtreleri temizle", tikla: () => { aramaInput.value = ""; state.arama = ""; filtreleriTemizle(); }, birincil: true },
         ]);
       } else {
-        bosDurumCiz("kayitliListe", 'Henüz kaydedilen bir haber yok.\nBir habere tıklayıp açılan pencereden "Kaydet" diyebilirsin.');
+        bosDurumCiz("kayitliListe", 'Henüz kaydedilen bir şey yok.\nBir habere tıklayıp "Kaydet" diyebilir, tarama tablosunda bir hissenin yıldızına ya da bir sohbette "Sohbeti Kaydet"e basabilirsin.');
       }
       return;
     }
-    gorulen.forEach((h, i) => kutu.appendChild(kartOlustur(h, i, detayGoster)));
+    gorulen.forEach((o, i) => {
+      const t = ogeTuru(o);
+      if (t === "hisse") kutu.appendChild(hisseKartiOlustur(o, i, ciz));
+      else if (t === "sohbet") kutu.appendChild(sohbetKartiOlustur(o, i, ciz));
+      else kutu.appendChild(kartOlustur(o, i, detayGoster));
+    });
   }
 
   if (aramaInput) {
@@ -1432,7 +1583,7 @@ function kayitliPaneliOlustur() {
 
   $("kayitliTemizleBtn").addEventListener("click", () => {
     if (kaydedilenleriYukle().length === 0) return;
-    if (!confirm("Tüm kaydedilen haberler silinsin mi?")) return;
+    if (!confirm("Tüm kaydedilenler (haberler, hisseler, sohbetler) silinsin mi?")) return;
     kaydedilenleriKaydet([]);
     ciz();
     toast("Tüm kayıtlar silindi.", "ok");
@@ -1574,7 +1725,40 @@ function taramaDurumGoster(tur, bilgi, tekrarFn) {
 
 const TARAMA_TABLO_ALANLARI = ["ticker", "sirket", "sektor", "ulke", "fiyat", "degisim_yuzde", "forward_pe", "peg", "p_fcf", "ev_ebitda", "ev_ebit", "fcf_yield"];
 
-function taramaPaneliOlustur() {
+// Tarama tablosundaki her satırın başındaki yıldız (kaydet/kaldır) butonu.
+// kayitliYenile: Kaydedilenler sekmesi o an açıksa listesini tazeler (opsiyonel).
+function yildizButonuOlustur(h, kayitliYenile) {
+  const anahtar = hisseAnahtari(h.ticker);
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "tarama-yildiz-btn";
+
+  function gorunumGuncelle() {
+    const kayitli = kayitliMi(anahtar);
+    b.classList.toggle("is-active", kayitli);
+    b.setAttribute("aria-pressed", kayitli ? "true" : "false");
+    b.setAttribute("aria-label", `${h.ticker} - ${kayitli ? "kaydedilenlerden kaldır" : "kaydedilenlere ekle"}`);
+    b.textContent = kayitli ? "★" : "☆";
+  }
+
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (kayitliMi(anahtar)) {
+      kaydedilenKaldir(anahtar);
+      toast("Kaydedilenlerden kaldırıldı.", "ok");
+    } else {
+      kaydedilenEkleGuncelle({ ...h, tur: "hisse", anahtar });
+      toast('Kaydedildi. "Kaydedilenler" sekmesinden ulaşabilirsin.', "ok");
+    }
+    gorunumGuncelle();
+    if (kayitliYenile) kayitliYenile();
+  });
+
+  gorunumGuncelle();
+  return b;
+}
+
+function taramaPaneliOlustur(kayitliYenile) {
   const state = {
     configYuklendi: false,
     ilkYuklemeBasladi: false,
@@ -1816,6 +2000,10 @@ function taramaPaneliOlustur() {
     tr.tabIndex = 0;
     tr.setAttribute("role", "button");
     tr.style.animationDelay = `${Math.min(index * 15, 250)}ms`;
+    const yildizTd = document.createElement("td");
+    yildizTd.className = "tarama-td-yildiz";
+    yildizTd.appendChild(yildizButonuOlustur(h, kayitliYenile));
+    tr.appendChild(yildizTd);
     TARAMA_TABLO_ALANLARI.forEach((alan) => hucreDoldur(tr, h, alan));
     const ac = () => window.open(`https://finviz.com/quote.ashx?t=${encodeURIComponent(h.ticker)}`, "_blank", "noopener");
     tr.addEventListener("click", ac);
@@ -2005,6 +2193,171 @@ function taramaPaneliOlustur() {
   return taramaIlkYukle;
 }
 
+/* ===================== AI Sohbet ===================== */
+// sohbetKartiOlustur'daki "Sohbete Devam Et" butonu, aiSohbetPaneliOlustur()
+// donusunce (baslat() icinde) bu degiskene atanir.
+let _aiSohbetYukleFn = null;
+
+function aiMesajBalonuOlustur(mesaj) {
+  const balon = document.createElement("div");
+  balon.className = "ai-mesaj ai-mesaj-" + (mesaj.rol === "kullanici" ? "kullanici" : "asistan") + (mesaj.hata ? " ai-mesaj-hata" : "");
+  const metin = document.createElement("p");
+  metin.className = "ai-mesaj-metin";
+  metin.textContent = mesaj.metin;
+  balon.appendChild(metin);
+  return balon;
+}
+
+function sohbetGoruntuleModalBaslat() {
+  modalBagla("sohbetGoruntuleOverlay", "closeSohbetGoruntule");
+}
+
+function sohbetGoruntule(oge) {
+  const govde = $("sohbetGoruntuleGovde");
+  govde.innerHTML = "";
+  (oge.mesajlar || []).forEach((m) => govde.appendChild(aiMesajBalonuOlustur(m)));
+
+  const eylemler = $("sohbetGoruntuleActions");
+  eylemler.innerHTML = "";
+  eylemler.appendChild(butonOlustur("Sohbete Devam Et", "btn btn-primary btn-sm", () => {
+    modalKapat("sohbetGoruntuleOverlay");
+    if (_aiSohbetYukleFn) _aiSohbetYukleFn(oge.mesajlar);
+    const sekmeBtn = document.querySelector('.tab-btn[data-tab="ai"]');
+    if (sekmeBtn) sekmeBtn.click();
+  }));
+
+  modalAc("sohbetGoruntuleOverlay", { ilkOdak: "closeSohbetGoruntule" });
+}
+
+function aiSohbetPaneliOlustur(kayitliYenile) {
+  const state = { mesajlar: [], gonderiliyor: false };
+
+  const liste = $("aiMesajListesi");
+  const form = $("aiGirisFormu");
+  const girisEl = $("aiMesajGirisi");
+  const gonderBtn = $("aiGonderBtn");
+  const kaydetBtn = $("aiSohbetiKaydetBtn");
+  const temizleBtn = $("aiSohbetiTemizleBtn");
+
+  function eylemleriGuncelle() {
+    const varMi = state.mesajlar.length > 0;
+    kaydetBtn.disabled = !varMi || state.gonderiliyor;
+    temizleBtn.disabled = !varMi || state.gonderiliyor;
+  }
+
+  function bosDurumuCiz() {
+    const bos = document.createElement("div");
+    bos.className = "empty-state";
+    bos.innerHTML = BOS_IKON;
+    const p = document.createElement("p");
+    p.textContent = 'Merhaba! Platformun güncel haber ve tarama verisine bakarak sorularını yanıtlayabilirim. Örnek: "Bugün önemli ne var?", "AAPL nasıl gidiyor?"';
+    bos.appendChild(p);
+    liste.appendChild(bos);
+  }
+
+  function ciz() {
+    liste.innerHTML = "";
+    if (state.mesajlar.length === 0) {
+      bosDurumuCiz();
+      eylemleriGuncelle();
+      return;
+    }
+    state.mesajlar.forEach((m) => liste.appendChild(aiMesajBalonuOlustur(m)));
+    if (state.gonderiliyor) {
+      const bekleme = document.createElement("div");
+      bekleme.className = "ai-mesaj ai-mesaj-asistan ai-mesaj-yukleniyor";
+      bekleme.setAttribute("aria-label", "Yanıt yazılıyor");
+      bekleme.innerHTML = "<span></span><span></span><span></span>";
+      liste.appendChild(bekleme);
+    }
+    liste.scrollTop = liste.scrollHeight;
+    eylemleriGuncelle();
+  }
+
+  function girisiOtomatikBoyutlandir() {
+    girisEl.style.height = "auto";
+    girisEl.style.height = `${Math.min(girisEl.scrollHeight, 160)}px`;
+  }
+  girisEl.addEventListener("input", girisiOtomatikBoyutlandir);
+  girisEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (typeof form.requestSubmit === "function") form.requestSubmit();
+      else gonder(new Event("submit"));
+    }
+  });
+
+  async function gonder(e) {
+    e.preventDefault();
+    const metin = girisEl.value.trim();
+    if (!metin || state.gonderiliyor) return;
+
+    state.mesajlar.push({ rol: "kullanici", metin });
+    girisEl.value = "";
+    girisiOtomatikBoyutlandir();
+    state.gonderiliyor = true;
+    gonderBtn.disabled = true;
+    ciz();
+
+    try {
+      const resp = await fetch("/api/sohbet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mesajlar: state.mesajlar.map((m) => ({ rol: m.rol, metin: m.metin })) }),
+      });
+      let yanit = null;
+      try { yanit = await resp.json(); } catch (err) { yanit = null; }
+      if (!resp.ok || !yanit || !yanit.ok) {
+        const limit = resp.status === 429;
+        const mesaj = (yanit && yanit.hata) || (limit ? "Çok fazla mesaj gönderildi; biraz sonra tekrar deneyin." : "Yanıt alınamadı.");
+        state.mesajlar.push({ rol: "asistan", metin: mesaj, hata: true });
+        toast(mesaj, limit ? "warn" : "error");
+      } else {
+        state.mesajlar.push({ rol: "asistan", metin: yanit.yanit || "" });
+      }
+    } catch (err) {
+      state.mesajlar.push({ rol: "asistan", metin: "Bağlantı kurulamadı. Lütfen tekrar deneyin.", hata: true });
+      toast("Bağlantı kurulamadı.", "error");
+    } finally {
+      state.gonderiliyor = false;
+      gonderBtn.disabled = false;
+      ciz();
+    }
+  }
+  form.addEventListener("submit", gonder);
+
+  kaydetBtn.addEventListener("click", () => {
+    if (state.mesajlar.length === 0) return;
+    const ilkKullanici = state.mesajlar.find((m) => m.rol === "kullanici");
+    const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    kaydedilenEkleGuncelle({
+      tur: "sohbet",
+      anahtar: sohbetAnahtari(id),
+      id,
+      baslik: ilkKullanici ? ilkKullanici.metin.slice(0, 80) : "Sohbet",
+      mesajlar: state.mesajlar.map((m) => ({ rol: m.rol, metin: m.metin })),
+    });
+    toast('Sohbet kaydedildi. "Kaydedilenler" sekmesinden ulaşabilirsin.', "ok");
+    if (kayitliYenile) kayitliYenile();
+  });
+
+  temizleBtn.addEventListener("click", () => {
+    if (state.mesajlar.length === 0) return;
+    if (!confirm("Bu sohbet temizlenip yeni bir sohbete mi başlansın?")) return;
+    state.mesajlar = [];
+    ciz();
+    girisEl.focus();
+  });
+
+  function disaridanYukle(mesajlar) {
+    state.mesajlar = (mesajlar || []).map((m) => ({ rol: m.rol, metin: m.metin }));
+    ciz();
+  }
+
+  ciz();
+  return disaridanYukle;
+}
+
 /* ===================== Başlat ===================== */
 function baslat() {
   $("toastStack").setAttribute("aria-live", "polite");
@@ -2016,7 +2369,10 @@ function baslat() {
   detayModalBaslat(kayitliYenile);
 
   taramaAnalizModalBaslat();
-  const taramaIlkYukle = taramaPaneliOlustur();
+  const taramaIlkYukle = taramaPaneliOlustur(kayitliYenile);
+
+  sohbetGoruntuleModalBaslat();
+  _aiSohbetYukleFn = aiSohbetPaneliOlustur(kayitliYenile);
 
   sekmeBaslat((sekme) => {
     if (sekme === "kaydedilenler") kayitliYenile();

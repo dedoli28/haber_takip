@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Haber Takip Platformu</title>
+<title>Piyasa Pusulası</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -13,13 +13,14 @@
 
 <header class="app-header">
   <div class="brand">
-    <h1 class="brand-name">Haber Takip Platformu</h1>
+    <h1 class="brand-name">Piyasa Pusulası</h1>
   </div>
   <div class="tabs" id="tabNav" role="tablist" aria-label="Bölümler">
     <span class="tabs-thumb" id="tabsThumb"></span>
     <button class="tab-btn is-active" data-tab="haberler" type="button" role="tab" id="tab-haberler" aria-selected="true" aria-controls="view-haberler">Haberler</button>
-    <button class="tab-btn" data-tab="kaydedilenler" type="button" role="tab" id="tab-kaydedilenler" aria-selected="false" tabindex="-1" aria-controls="view-kaydedilenler">Kaydedilenler</button>
+    <button class="tab-btn" data-tab="ai" type="button" role="tab" id="tab-ai" aria-selected="false" tabindex="-1" aria-controls="view-ai">AI</button>
     <button class="tab-btn" data-tab="tarama" type="button" role="tab" id="tab-tarama" aria-selected="false" tabindex="-1" aria-controls="view-tarama">Tarama</button>
+    <button class="tab-btn" data-tab="kaydedilenler" type="button" role="tab" id="tab-kaydedilenler" aria-selected="false" tabindex="-1" aria-controls="view-kaydedilenler">Kaydedilenler</button>
   </div>
   <div class="header-actions">
     <button class="icon-btn" id="themeToggle" type="button" title="Tema değiştir" aria-label="Tema değiştir">
@@ -216,6 +217,30 @@
     </div>
   </section>
 
+  <!-- ===================== AI SOHBET ===================== -->
+  <section class="view" id="view-ai" role="tabpanel" aria-labelledby="tab-ai">
+    <div class="ai-sohbet-kutusu">
+      <div class="ai-mesaj-listesi" id="aiMesajListesi" aria-live="polite">
+        <div class="empty-state" id="aiBosDurum">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3C7 3 3 6.6 3 11c0 2.4 1.2 4.5 3.1 6L5 21l4.3-1.7c.9.3 1.8.4 2.7.4 5 0 9-3.6 9-8s-4-8.7-9-8.7Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="8.3" cy="11" r="1" fill="currentColor"/><circle cx="12" cy="11" r="1" fill="currentColor"/><circle cx="15.7" cy="11" r="1" fill="currentColor"/></svg>
+          <p>Merhaba! Platformun güncel haber ve tarama verisine bakarak sorularını yanıtlayabilirim.<br>Örnek: "Bugün önemli ne var?", "AAPL nasıl gidiyor?"</p>
+        </div>
+      </div>
+      <p class="hint ai-uyari-notu">Yalnızca platformdaki güncel veriye dayanır; yatırım tavsiyesi değildir.</p>
+      <form class="ai-giris-satiri" id="aiGirisFormu">
+        <textarea id="aiMesajGirisi" placeholder="Bir soru yaz... (Enter: gönder, Shift+Enter: yeni satır)" rows="1" aria-label="Mesajınız" maxlength="2000"></textarea>
+        <button class="btn btn-primary" id="aiGonderBtn" type="submit">
+          <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 11l18-8-8 18-2-8-8-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          Gönder
+        </button>
+      </form>
+      <div class="ai-eylemler">
+        <button class="btn btn-outline btn-sm" id="aiSohbetiKaydetBtn" type="button" disabled>Sohbeti Kaydet</button>
+        <button class="btn btn-ghost btn-sm" id="aiSohbetiTemizleBtn" type="button" disabled>Yeni Sohbet</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ===================== TARAMA (screener) ===================== -->
   <section class="view" id="view-tarama" role="tabpanel" aria-labelledby="tab-tarama">
     <div class="control-panel control-panel-compact">
@@ -268,6 +293,7 @@
         <caption class="sr-only">Filtrelenmiş hisse tarama sonuçları</caption>
         <thead>
           <tr>
+            <th scope="col" class="tarama-th-yildiz"><span class="sr-only">Kaydet</span></th>
             <th scope="col"><button type="button" class="tarama-th-sirala" data-alan="ticker">Sembol</button></th>
             <th scope="col" class="tarama-th-sirket"><button type="button" class="tarama-th-sirala" data-alan="sirket">Şirket</button></th>
             <th scope="col"><button type="button" class="tarama-th-sirala" data-alan="sektor">Sektör</button></th>
@@ -304,7 +330,16 @@
           </button>
           <div class="filter-popover" id="kayitliFiltrePopover" role="group" aria-label="Kayıt filtreleri">
             <div class="filter-popover-section">
-              <div class="filter-popover-title">Haber Türü <span class="filter-popover-hint">(birden çok seçilebilir)</span></div>
+              <div class="filter-popover-title">Tür</div>
+              <div class="chip-row chip-row-tight" id="kayitliTurChips" role="group" aria-label="Kayıt türü">
+                <button class="chip chip-all is-active" data-tur="">Tümü</button>
+                <button class="chip" data-tur="haber" style="--chip-c:#8b5cf6">Haberler</button>
+                <button class="chip" data-tur="hisse" style="--chip-c:#22c55e">Hisseler</button>
+                <button class="chip" data-tur="sohbet" style="--chip-c:#0ea5e9">Sohbetler</button>
+              </div>
+            </div>
+            <div class="filter-popover-section">
+              <div class="filter-popover-title">Haber Türü <span class="filter-popover-hint">(birden çok seçilebilir; yalnızca haberler için)</span></div>
               <div class="chip-row chip-row-tight" id="kayitliKategoriChips" role="group" aria-label="Haber türü">
                 <button class="chip chip-all is-active" data-kategori="">Tümü</button>
                 <button class="chip" data-kategori="ana" style="--chip-c:#8b5cf6">Piyasa</button>
@@ -342,13 +377,13 @@
         <div class="field-spacer"></div>
         <button class="btn btn-outline btn-sm" id="kayitliTemizleBtn">Tümünü Temizle</button>
       </div>
-      <p class="hint">Kaydettiğin haber/blogların özeti, önem seviyesi ve (varsa) analizi burada saklanır — arka plan taraması bunları temizlemez.</p>
+      <p class="hint">Kaydettiğin haberler, hisseler ve AI sohbetleri burada saklanır — arka plan taraması bunları temizlemez.</p>
     </div>
 
     <div class="card-list" id="kayitliListe">
       <div class="empty-state">
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none"><path d="M17 3H7a2 2 0 0 0-2 2v16l7-4 7 4V5a2 2 0 0 0-2-2Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
-        <p>Henüz kaydedilen bir haber yok.<br>Bir habere tıklayıp açılan pencereden "Kaydet" diyebilirsin.</p>
+        <p>Henüz kaydedilen bir şey yok.<br>Bir habere tıklayıp "Kaydet" diyebilir, tarama tablosunda bir hissenin yıldızına ya da bir sohbette "Sohbeti Kaydet"e basabilirsin.</p>
       </div>
     </div>
   </section>
@@ -465,6 +500,20 @@
       <p class="detail-summary">Yükleniyor...</p>
     </div>
     <div class="day-summary-actions" id="taramaAnalizActions" hidden></div>
+  </div>
+</div>
+
+<!-- ===================== KAYDEDİLEN SOHBET MODAL ===================== -->
+<div class="modal-overlay" id="sohbetGoruntuleOverlay">
+  <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="sohbetGoruntuleTitle">
+    <div class="modal-head">
+      <h3 id="sohbetGoruntuleTitle">Kaydedilen Sohbet</h3>
+      <button class="icon-btn" id="closeSohbetGoruntule" type="button" aria-label="Kapat">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="ai-mesaj-listesi ai-mesaj-listesi-modal" id="sohbetGoruntuleGovde" style="margin-top:14px;"></div>
+    <div class="day-summary-actions" id="sohbetGoruntuleActions"></div>
   </div>
 </div>
 

@@ -49,7 +49,7 @@ def eposta_gonder(aliciler: list[str], konu: str, html_govde: str) -> None:
             for alici in aliciler:
                 mesaj = MIMEMultipart("alternative")
                 mesaj["Subject"] = konu
-                mesaj["From"] = f"Haber Takip Platformu <{adres}>"
+                mesaj["From"] = f"Piyasa Pusulası <{adres}>"
                 mesaj["To"] = alici
                 mesaj.attach(MIMEText(html_govde, "html", "utf-8"))
                 try:

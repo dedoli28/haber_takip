@@ -1,5 +1,5 @@
 """
-Haber Takip Platformu - Vercel icin web surumu (v2: surekli izleme).
+Piyasa Pusulası - Vercel icin web surumu (v2: surekli izleme).
 
 Mimari:
   - Haber kaynaklari: ABD (Finviz, HTML kazima) + Turkiye, Almanya, Cin (RSS/
@@ -74,6 +74,7 @@ import gun_ozeti_servisi
 import market_data_service
 import market_symbols
 import redis_store
+import sohbet_baglami
 import tarama_servisi
 from finviz_scraper import _saat_metnini_utc_zamanina_cevir, haber_grubu, tum_turleri_cek
 from gemini_client import (
@@ -85,11 +86,13 @@ from gemini_client import (
     gun_ozeti_schema_olustur,
     siniflandirma_prompt_olustur,
     siniflandirma_schema_olustur,
+    sohbet_prompt_olustur,
+    sohbet_schema_olustur,
     tarama_analiz_prompt_olustur,
     tarama_analiz_schema_olustur,
 )
 
-app = FastAPI(title="Haber Takip Platformu")
+app = FastAPI(title="Piyasa Pusulası")
 
 # CORS: yalnizca bilinen originlere izin verilir (arayuz zaten ayni originden
 # servis edildigi icin normal kullanimda CORS gerekmez). Ek originler
@@ -616,6 +619,68 @@ async def tarama_analiz(request: Request):
     }
 
 
+# ------------------------------------------------------------------ AI Sohbet
+SOHBET_AZAMI_ISTEK = 20
+SOHBET_PENCERE_SN = 10 * 60
+SOHBET_AZAMI_GECMIS = 20  # son N mesaj (istemci daha fazlasini gonderirse kirpilir)
+SOHBET_AZAMI_MESAJ_UZUNLUK = 2000
+
+
+@app.post("/api/sohbet")
+async def sohbet(request: Request):
+    """Platform verisiyle (guncel haberler, tarama sonuclari) baglamlandirilmis
+    sohbet. Sunucu durumsuzdur (stateless): istemci her istekte tum konusma
+    gecmisini gonderir (Kaydedilenler'deki gibi tarayici tarafinda saklanir).
+    Herkese acik ve Gemini kotasi harcadigi icin IP basina sinirlanir."""
+    api_key = _gemini_anahtari()
+    if not api_key:
+        return JSONResponse({"ok": False, "hata": "Sunucuda GEMINI_API_KEY tanımlı değil."}, status_code=500)
+
+    body = await request.json()
+    ham_mesajlar = body.get("mesajlar")
+    if not isinstance(ham_mesajlar, list) or not ham_mesajlar:
+        return JSONResponse({"ok": False, "hata": "Mesaj bulunamadı."}, status_code=400)
+
+    mesajlar = []
+    for m in ham_mesajlar[-SOHBET_AZAMI_GECMIS:]:
+        if not isinstance(m, dict):
+            continue
+        rol = m.get("rol")
+        metin = str(m.get("metin") or "").strip()[:SOHBET_AZAMI_MESAJ_UZUNLUK]
+        if rol in ("kullanici", "asistan") and metin:
+            mesajlar.append({"rol": rol, "metin": metin})
+    if not mesajlar or mesajlar[-1]["rol"] != "kullanici":
+        return JSONResponse({"ok": False, "hata": "Geçerli bir kullanıcı mesajı bulunamadı."}, status_code=400)
+
+    ip_hash = hashlib.sha256(_istemci_ip(request).encode("utf-8")).hexdigest()[:32]
+    try:
+        siniri_asti = redis_store.istek_siniri_asildi_mi(
+            f"htp:rl:sohbet:{ip_hash}", SOHBET_AZAMI_ISTEK, SOHBET_PENCERE_SN
+        )
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": "İstek sınırı şu an denetlenemiyor, lütfen sonra tekrar deneyin."}, status_code=503)
+    if siniri_asti:
+        return JSONResponse(
+            {
+                "ok": False,
+                "hata": f"Çok fazla mesaj gönderdiniz. {SOHBET_PENCERE_SN // 60} dakika içinde en fazla "
+                f"{SOHBET_AZAMI_ISTEK} mesaj gönderilebilir; lütfen biraz sonra tekrar deneyin.",
+            },
+            status_code=429,
+            headers={"Retry-After": str(SOHBET_PENCERE_SN)},
+        )
+
+    baglam = sohbet_baglami.baglam_olustur(mesajlar[-1]["metin"])
+    prompt = sohbet_prompt_olustur(mesajlar, baglam)
+    schema = sohbet_schema_olustur()
+    try:
+        sonuc = gemini_json_iste(prompt, schema, api_key, GEMINI_MODEL, timeout=15)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
+
+    return {"ok": True, "yanit": sonuc.get("yanit", "")}
+
+
 def _tarama_cron_calistir(evren: str) -> JSONResponse:
     try:
         evren = tarama_servisi.evreni_dogrula(evren)
@@ -867,7 +932,7 @@ def _esik_email_html(tetiklenen: dict[str, list[str]], depo: dict) -> str:
     gonderim hatasi yuzunden birikmisse) e-postanin devasa buyup zaman
     asimina/gonderim hatasina yol acmamasi icin sinif basina yalnizca en son
     EPOSTA_SINIF_BASINA_AZAMI haber gosterilir, kalani ozetlenir."""
-    parcalar = ["<h2>Haber Takip Platformu</h2><p>Aşağıdaki önem eşikleri aşıldı:</p>"]
+    parcalar = ["<h2>Piyasa Pusulası</h2><p>Aşağıdaki önem eşikleri aşıldı:</p>"]
     for sinif, ham_urller in tetiklenen.items():
         urller = _urlleri_baslik_bazinda_tekillestir(ham_urller, depo)
         gosterilen = urller[-EPOSTA_SINIF_BASINA_AZAMI:]
@@ -891,7 +956,7 @@ def _gun_sonu_email_html(gun_ozeti: dict, bekleyen: dict, depo: dict) -> str:
     """Gun sonu e-postasinin govdesini olusturur: once haber turu basina
     ozet + genel ozet, sonra (varsa) o gun esige hic ulasmadigi icin
     bildirilmemis kalan haberlerin listesi."""
-    parcalar = ["<h2>Haber Takip Platformu — Günün Özeti</h2>"]
+    parcalar = ["<h2>Piyasa Pusulası — Günün Özeti</h2>"]
 
     for k in gun_ozeti.get("kategoriler", []):
         etiket = _html_kacis(str(KATEGORI_ETIKET.get(k.get("kategori"), k.get("kategori"))))
@@ -987,7 +1052,7 @@ def _esik_takibi_ve_bildirim(yeni_ogeler: list[dict], depo: dict) -> list[str]:
 
                 try:
                     html = _esik_email_html(tetiklenen, depo)
-                    email_client.eposta_gonder([eposta], "Haber Takip Platformu - Yeni Önemli Haberler", html)
+                    email_client.eposta_gonder([eposta], "Piyasa Pusulası - Yeni Önemli Haberler", html)
                     for s in tetiklenen:
                         bekleyen[s] = []
                     son_gonderim[eposta] = simdi_istanbul.isoformat(timespec="milliseconds")
@@ -1552,7 +1617,7 @@ def gun_sonu(request: Request):
             bekleyen = bekleyenler_tum.get(eposta, {})
             html = _gun_sonu_email_html(gun_ozeti, bekleyen, depo)
             try:
-                email_client.eposta_gonder([eposta], "Haber Takip Platformu - Günün Özeti", html)
+                email_client.eposta_gonder([eposta], "Piyasa Pusulası - Günün Özeti", html)
                 bekleyenler_tum[eposta] = {s: [] for s in SINIF_ESIK_LISTESI}
                 gonderilen += 1
             except Exception as e:  # noqa: BLE001
@@ -1611,7 +1676,7 @@ def sabah_ozeti(request: Request):
             html = _esik_email_html({"cok_onemli": urller}, depo)
             try:
                 email_client.eposta_gonder(
-                    [eposta], "Haber Takip Platformu - Gece Boyunca Gelen Çok Önemli Haberler", html
+                    [eposta], "Piyasa Pusulası - Gece Boyunca Gelen Çok Önemli Haberler", html
                 )
                 bekleyen["cok_onemli"] = []
                 son_gonderim[eposta] = simdi_iso

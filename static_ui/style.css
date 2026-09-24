@@ -814,3 +814,83 @@ button.alici-sil-btn:hover { background: var(--bg-input); }
   .tarama-tablo-kutusu { max-height: calc(100vh - 320px); }
   .tarama-oran-etiket { flex-basis: 78px; font-size: 11.5px; }
 }
+
+/* ===================== Tarama: yıldız (kaydet) sütunu ===================== */
+.tarama-th-yildiz { width: 30px; padding: 0 !important; }
+.tarama-td-yildiz { padding: 0 0 0 8px !important; }
+.tarama-yildiz-btn {
+  background: none; border: none; cursor: pointer; font-size: 16px; line-height: 1;
+  color: var(--text-faint); padding: 4px; border-radius: 6px; transition: color .12s ease, transform .12s ease;
+}
+.tarama-yildiz-btn:hover { color: #fbbf24; transform: scale(1.12); }
+.tarama-yildiz-btn.is-active { color: #fbbf24; }
+
+/* ===================== Kaydedilenler: hisse/sohbet kartları ===================== */
+.c-hisse .item-stripe { background: #22c55e; }
+.c-hisse .badge.kayitli-hisse-rozet { background: rgba(34,197,94,.14); color: #4ade80; }
+.c-sohbet .item-stripe { background: #0ea5e9; }
+.c-sohbet .badge.kayitli-sohbet-rozet { background: rgba(14,165,233,.14); color: #38bdf8; }
+html[data-theme="light"] .c-hisse .badge.kayitli-hisse-rozet { color: #15803d; }
+html[data-theme="light"] .c-sohbet .badge.kayitli-sohbet-rozet { color: #0369a1; }
+
+.c-hisse, .c-sohbet { position: relative; }
+.kayitli-kaldir-btn {
+  position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--bg-panel); border: 1px solid var(--border-soft); color: var(--text-faint);
+  cursor: pointer; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .12s ease, color .12s ease, border-color .12s ease;
+}
+.item-card:hover .kayitli-kaldir-btn, .kayitli-kaldir-btn:focus-visible { opacity: 1; }
+.kayitli-kaldir-btn:hover { color: var(--danger); border-color: var(--danger); }
+
+/* ===================== AI Sohbet ===================== */
+.ai-sohbet-kutusu {
+  display: flex; flex-direction: column; gap: 10px; height: calc(100vh - 220px); min-height: 360px;
+}
+.ai-mesaj-listesi {
+  flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+  background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+  padding: 16px; scroll-behavior: smooth;
+}
+.ai-mesaj-listesi .empty-state { margin: auto; }
+.ai-mesaj { max-width: min(640px, 82%); display: flex; animation: cardIn .22s ease backwards; }
+.ai-mesaj-kullanici { align-self: flex-end; }
+.ai-mesaj-asistan { align-self: flex-start; }
+.ai-mesaj-metin {
+  margin: 0; padding: 10px 14px; border-radius: 14px; line-height: 1.55; font-size: 14px;
+  white-space: pre-wrap; word-break: break-word;
+}
+.ai-mesaj-kullanici .ai-mesaj-metin { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+.ai-mesaj-asistan .ai-mesaj-metin {
+  background: var(--bg-card-hover); color: var(--text); border: 1px solid var(--border-soft);
+  border-bottom-left-radius: 4px;
+}
+.ai-mesaj-hata .ai-mesaj-metin { border-color: var(--danger); color: var(--danger); }
+
+.ai-mesaj-yukleniyor {
+  background: var(--bg-card-hover); border: 1px solid var(--border-soft); border-radius: 14px;
+  border-bottom-left-radius: 4px; padding: 12px 16px; display: flex; gap: 5px; align-items: center;
+}
+.ai-mesaj-yukleniyor span {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint);
+  animation: aiYaziyor 1s ease-in-out infinite;
+}
+.ai-mesaj-yukleniyor span:nth-child(2) { animation-delay: .15s; }
+.ai-mesaj-yukleniyor span:nth-child(3) { animation-delay: .3s; }
+@keyframes aiYaziyor { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+
+.ai-uyari-notu { margin: 0; text-align: center; }
+.ai-giris-satiri { display: flex; gap: 8px; align-items: flex-end; }
+.ai-giris-satiri textarea {
+  flex: 1; resize: none; min-height: 44px; max-height: 160px; padding: 10px 14px; border-radius: var(--radius-md);
+  background: var(--bg-card); border: 1px solid var(--border-soft); color: var(--text); font: inherit; line-height: 1.5;
+}
+.ai-giris-satiri textarea:focus { outline: none; border-color: var(--accent); }
+.ai-eylemler { display: flex; gap: 8px; justify-content: flex-end; }
+
+.ai-mesaj-listesi-modal { max-height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+
+@media (max-width: 640px) {
+  .ai-sohbet-kutusu { height: calc(100vh - 190px); }
+  .ai-mesaj { max-width: 90%; }
+}

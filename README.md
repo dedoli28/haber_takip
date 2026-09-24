@@ -1,4 +1,4 @@
-# Haber Takip Platformu (Web / Vercel Sürümü)
+# Piyasa Pusulası (Web / Vercel Sürümü)
 
 ABD, Türkiye, Almanya ve Çin finans haberlerini çeken, Gemini API ile borsa
 önemine göre sınıflandırıp Türkçe özetleyen, önemli haberleri e-postayla
@@ -194,6 +194,39 @@ Tarayıcı API'si** sayfasındaki "API Belirteci Oluştur" ile alınır.
 - **Redis anahtarları:** `htp:tarama:v1:<evren>` (hisse listesi + zaman
   damgası, 3 gün TTL), `htp:tarama:v1:<evren>:kilit` (55 sn SET NX EX).
 
+## AI Sohbet
+
+**AI** sekmesi, platformun güncel verisiyle konuşabilen bir Gemini sohbet
+arayüzüdür ("Bugün önemli ne var?", "AAPL nasıl gidiyor?" gibi sorular
+yanıtlar). Sunucu durumsuzdur: her istekte tarayıcı tüm konuşma geçmişini
+gönderir (`localStorage`'a otomatik yazılmaz — yalnızca kullanıcı "Sohbeti
+Kaydet"e basarsa Kaydedilenler'e eklenir).
+
+- **Baglam (grounding):** `sohbet_baglami.py`, YENİ bir Finviz/Gemini isteği
+  TETİKLEMEDEN, zaten onbellekte olan üç kaynaktan bir özet çıkarır: (1)
+  günün hazır özeti (varsa), (2) en önemli/güncel ~12 haber, (3) kullanıcının
+  son mesajında geçen ve S&P 500/NASDAQ 100 tarama önbelleğinde bulunan
+  hisseler (basit ticker eşleştirme — gerçek bir fonksiyon çağırma/tool-use
+  akışı değildir). Veri yoksa model "bu konuda güncel veri yok" demesi için
+  açıkça yönlendirilir; uydurma sayı/haber üretmemesi istenir.
+- **Uç nokta:** `POST /api/sohbet` — gövde `{"mesajlar": [{"rol": "kullanici"|
+  "asistan", "metin": "..."}]}` (son öge `kullanici` olmalı), yanıt
+  `{"ok": true, "yanit": "..."}`. Herkese açık olduğu için IP başına 10
+  dakikada en fazla 20 mesajla sınırlıdır; geçmiş sunucuda son 20 mesaja,
+  her mesaj 2000 karaktere kırpılır.
+
+## Kaydedilenler: haber + hisse + sohbet
+
+Kaydedilenler artık üç tür kayıt tutar (hepsi `localStorage`, hesap/sunucu
+tarafı yok): **haberler** (mevcut davranış, `url` ile anahtarlanır),
+**hisseler** (Tarama tablosundaki ★ ile eklenir/kaldırılır, `hisse:<TICKER>`
+ile anahtarlanır) ve **sohbetler** (AI sekmesinde "Sohbeti Kaydet",
+`sohbet:<id>` ile anahtarlanır). Bir **Tür** filtresi (Tümü/Haberler/
+Hisseler/Sohbetler) üstte durur; mevcut Haber Türü/Ülke/Önem filtreleri
+yalnızca haber kayıtlarını etkiler. Kayıtlı bir sohbete tıklamak salt-okunur
+bir önizleme açar; "Sohbete Devam Et" AI sekmesine geçip o konuşmayı
+kaldığı yerden sürdürür (üstüne yazar, birleştirmez).
+
 ## Ortam değişkenleri
 
 | Değişken | Zorunlu | Açıklama |
@@ -254,6 +287,9 @@ istek yöntemini `POST` seçin.
   başına 10 dakikada en fazla 5 istekle sınırlıdır (Upstash Redis `INCR` +
   `EXPIRE`; IP, Redis anahtarında SHA-256 ile hashlenmiş olarak tutulur).
   Aşılırsa `429` döner.
+- **`/api/sohbet`:** aynı IP/SHA-256 deseniyle, 10 dakikada en fazla 20
+  mesajla sınırlıdır (bir sohbet birden çok tur gerektirdiği için diğer AI
+  uçlarından daha yüksek).
 - `/api/ayarlar` (bildirim e-postaları) ve `/api/durum` şu an herhangi bir
   gizli anahtar istemez.
 - E-posta gövdesindeki başlık/özet/URL değerleri HTML-kaçışlanır; arayüz
