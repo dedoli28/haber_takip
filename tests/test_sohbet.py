@@ -165,7 +165,7 @@ def test_sohbet_basarili_ve_gemini_baglami_gorur(istemci, monkeypatch, redis):
     monkeypatch.setattr(uygulama.sohbet_baglami, "baglam_olustur", lambda mesaj: "TEST_BAGLAM_ISARETI")
     yakalanan = {}
 
-    def sahte_gemini(prompt, schema, api_key, model, timeout=10):
+    def sahte_gemini(prompt, schema, api_key, model, timeout=10, deneme_sayisi=2):
         yakalanan["prompt"] = prompt
         return {"yanit": "Merhaba, nasıl yardımcı olabilirim?"}
 
@@ -189,7 +189,7 @@ def test_sohbet_uzun_gecmis_kirpilir(istemci, monkeypatch, redis):
     monkeypatch.setattr(uygulama.sohbet_baglami, "baglam_olustur", lambda mesaj: "")
     yakalanan = {}
 
-    def sahte_gemini(prompt, schema, api_key, model, timeout=10):
+    def sahte_gemini(prompt, schema, api_key, model, timeout=10, deneme_sayisi=2):
         yakalanan["prompt"] = prompt
         return {"yanit": "ok"}
 

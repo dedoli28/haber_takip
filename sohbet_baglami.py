@@ -14,7 +14,7 @@ import gun_ozeti_servisi
 import redis_store
 import tarama_servisi
 
-AZAMI_HABER = 12
+AZAMI_HABER = 8  # daha kucuk prompt = Gemini icin daha hizli yanit (canli gozlemlenen zaman asimina karsi)
 AZAMI_HISSE = 5
 _ONEM_SIRA = {"cok_onemli": 0, "onemli": 1, "bakmaya_deger": 2, "onemsiz": 3}
 # BUYUK harfle yazilmis 2-5 harfli kelimeler (ör. "AAPL nasil?"). Kucuk/karisik
@@ -62,8 +62,8 @@ def _hisseleri_esle(adaylar: set[str], evren_sonuclari: list[list[dict]]) -> lis
 def _haber_satiri(h: dict) -> str:
     baslik = h.get("baslikTr") or h.get("baslik") or ""
     ozet = (h.get("ai_ozet") or "").strip()
-    if len(ozet) > 140:
-        ozet = ozet[:140].rstrip() + "…"
+    if len(ozet) > 100:
+        ozet = ozet[:100].rstrip() + "…"
     saat = h.get("saat") or ""
     parcalar = [p for p in (saat, baslik) if p]
     satir = " ".join(parcalar) if not saat else f"[{saat}] {baslik}"

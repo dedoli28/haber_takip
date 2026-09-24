@@ -676,7 +676,12 @@ async def sohbet(request: Request):
     prompt = sohbet_prompt_olustur(mesajlar, baglam)
     schema = sohbet_schema_olustur()
     try:
-        sonuc = gemini_json_iste(prompt, schema, api_key, GEMINI_MODEL, timeout=20)
+        # Baglamli sohbet prompt'u (gun ozeti + haberler + varsa hisseler)
+        # diger AI uclarindan daha buyuk olabilir; Gemini bunun icin 20 sn'yi
+        # asabiliyor (canli gozlemlendi). 2 kisa deneme yerine TEK, daha uzun
+        # bir deneme (Vercel'in 60 sn fonksiyon sinirinin altinda) daha
+        # guvenilir: iki 20 sn'lik denemenin toplami zaten sinira yakindi.
+        sonuc = gemini_json_iste(prompt, schema, api_key, GEMINI_MODEL, timeout=40, deneme_sayisi=1)
     except Exception as e:  # noqa: BLE001
         log.warning("sohbet basarisiz: %s: %s", type(e).__name__, e)
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
