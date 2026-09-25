@@ -30,10 +30,14 @@ SON_SINIFLANDIRMA_KEY = "htp:son_siniflandirma"
 
 SINIF_ESIK_LISTESI = ["cok_onemli", "onemli", "bakmaya_deger"]
 
-# Esikler artik sabit (app.py'deki ESIKLER); kullanicinin ayarlayabildigi
-# tek sey bildirim e-postalari listesi.
-# alicilar: [{"eposta": str}, ...]
-VARSAYILAN_AYARLAR = {"alicilar": []}
+# alicilar: [{"eposta": str}, ...]. esikler: sinif basina kac YENI (henuz
+# bildirilmemis) haber biriktiginde e-posta atilacagi (bkz. app.py ESIKLER
+# varsayilanlari); kullanici Ayarlar'dan degistirebilir, degistirmezse
+# varsayilanlar kullanilir.
+VARSAYILAN_AYARLAR = {
+    "alicilar": [],
+    "esikler": {"cok_onemli": 10, "onemli": 25, "bakmaya_deger": 50},
+}
 
 # Esik sayaclari aslinda alici basina "bekleyen" (henuz o aliciya e-postayla
 # bildirilmemis) haberlerin URL listesidir: {eposta: {sinif: [url, ...]}}.

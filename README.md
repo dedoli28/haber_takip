@@ -290,8 +290,12 @@ istek yöntemini `POST` seçin.
 - **`/api/sohbet`:** aynı IP/SHA-256 deseniyle, 10 dakikada en fazla 20
   mesajla sınırlıdır (bir sohbet birden çok tur gerektirdiği için diğer AI
   uçlarından daha yüksek).
-- `/api/ayarlar` (bildirim e-postaları) ve `/api/durum` şu an herhangi bir
-  gizli anahtar istemez.
+- `/api/ayarlar` (bildirim e-postaları + eşikler) ve `/api/durum` şu an
+  herhangi bir gizli anahtar istemez. Eşikler (sınıf başına kaç YENİ haber
+  birikince e-posta gideceği) artık arayüzden (Ayarlar) değiştirilebilir;
+  varsayılanlar `app.py`'deki `ESIKLER` (10/25/50), 1-1000 aralığı dışındaki
+  ya da geçersiz değerler sunucuda sessizce varsayılana döner
+  (`_esikleri_dogrula`).
 - E-posta gövdesindeki başlık/özet/URL değerleri HTML-kaçışlanır; arayüz
   sunucu metinlerini `textContent` ile gösterir.
 

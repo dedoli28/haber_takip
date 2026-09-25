@@ -137,8 +137,10 @@ MAX_ISLENECEK_SINIFLANDIRMA_BASINA = TARA_GRUP_BOYUTU
 SINIF_ESIK_LISTESI = redis_store.SINIF_ESIK_LISTESI
 SINIF_ETIKET_TR = {"cok_onemli": "Çok Önemli", "onemli": "Önemli", "bakmaya_deger": "Bakmaya Değer"}
 
-# Esikler artik kullanicidan alinmiyor, sabit: herkes ayni sayilari kullanir.
+# Varsayilan esikler; kullanici Ayarlar'dan degistirmezse bunlar kullanilir
+# (bkz. redis_store.VARSAYILAN_AYARLAR, /api/ayarlar).
 ESIKLER = {"cok_onemli": 10, "onemli": 25, "bakmaya_deger": 50}
+ESIK_AZAMI = 1000  # sacma/asiri buyuk deger girisine karsi ust sinir
 
 # Ayni alici arka arkaya cok sik esik e-postasi almasin diye, bir alici
 # ancak bu kadar dakikada bir esik e-postasi alabilir (esik erken asilsa
@@ -438,7 +440,7 @@ def durum():
 
     return {
         "ok": True,
-        "esikler": ESIKLER,
+        "esikler": ayarlar.get("esikler", ESIKLER),
         "gunduzBaslangicSaat": GECE_BITIS_SAAT,
         "aliciDurumlari": alici_durumlari,
         "epostaYapilandirilmisMi": email_client.yapilandirilmis_mi(),
@@ -458,6 +460,20 @@ def ayarlar_getir():
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
 
+def _esikleri_dogrula(ham) -> dict:
+    """Gecersiz/eksik/sinir disi degerler sessizce varsayilana duser (kullanici
+    yanlislikla 0 ya da metin gonderirse bildirimler tamamen bozulmasin)."""
+    ham = ham if isinstance(ham, dict) else {}
+    sonuc = {}
+    for s in SINIF_ESIK_LISTESI:
+        try:
+            deger = int(ham.get(s))
+        except (TypeError, ValueError):
+            deger = ESIKLER[s]
+        sonuc[s] = min(max(deger, 1), ESIK_AZAMI)
+    return sonuc
+
+
 @app.post("/api/ayarlar")
 async def ayarlar_guncelle(request: Request):
     body = await request.json()
@@ -471,7 +487,7 @@ async def ayarlar_guncelle(request: Request):
         gorulen_eposta.add(eposta)
         alicilar.append({"eposta": eposta})
 
-    yeni_ayarlar = {"alicilar": alicilar}
+    yeni_ayarlar = {"alicilar": alicilar, "esikler": _esikleri_dogrula(body.get("esikler"))}
     try:
         redis_store.ayarlar_kaydet(yeni_ayarlar)
     except Exception as e:  # noqa: BLE001
@@ -1022,6 +1038,7 @@ def _esik_takibi_ve_bildirim(yeni_ogeler: list[dict], depo: dict) -> list[str]:
 
     ayarlar = redis_store.ayarlar_yukle()
     aliciler = [a for a in ayarlar.get("alicilar", []) if a.get("eposta")]
+    esikler = ayarlar.get("esikler") or ESIKLER
 
     bekleyenler_tum = redis_store.sayaclari_yukle()  # {eposta: {sinif: [url, ...]}}
 
@@ -1044,7 +1061,7 @@ def _esik_takibi_ve_bildirim(yeni_ogeler: list[dict], depo: dict) -> list[str]:
                 eposta = alici["eposta"]
                 bekleyen = bekleyenler_tum[eposta]
                 tetiklenen = {
-                    s: bekleyen[s] for s in SINIF_ESIK_LISTESI if len(bekleyen.get(s, [])) >= ESIKLER[s]
+                    s: bekleyen[s] for s in SINIF_ESIK_LISTESI if len(bekleyen.get(s, [])) >= esikler.get(s, ESIKLER[s])
                 }
                 if not tetiklenen:
                     continue

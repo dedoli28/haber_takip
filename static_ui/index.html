@@ -228,7 +228,7 @@
       </div>
       <p class="hint ai-uyari-notu">Yalnızca platformdaki güncel veriye dayanır; yatırım tavsiyesi değildir.</p>
       <form class="ai-giris-satiri" id="aiGirisFormu">
-        <textarea id="aiMesajGirisi" placeholder="Bir soru yaz... (Enter: gönder, Shift+Enter: yeni satır)" rows="1" aria-label="Mesajınız" maxlength="2000"></textarea>
+        <textarea id="aiMesajGirisi" placeholder="Bir soru yaz..." rows="1" aria-label="Mesajınız (Enter: gönder, Shift+Enter: yeni satır)" maxlength="2000"></textarea>
         <button class="btn btn-primary" id="aiGonderBtn" type="submit">
           <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 11l18-8-8 18-2-8-8-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
           Gönder
@@ -284,6 +284,7 @@
       </div>
       <div class="active-filters" id="taramaAktifFiltreler" role="group" aria-label="Aktif tarama filtreleri" hidden></div>
       <p class="hint status-meta" id="taramaDurumSatiri">Tarama verisi yükleniyor…</p>
+      <p class="hint tarama-kaydir-ipucu">↔ Fiyat ve oranları görmek için tabloyu yana kaydırın.</p>
     </div>
 
     <div class="tarama-tablo-kutusu" id="taramaTabloKutusu" aria-busy="true">
@@ -401,8 +402,28 @@
     </div>
 
     <div class="modal-section">
+      <div class="modal-section-title" id="esikBaslik">Bildirim Eşikleri</div>
+      <p class="modal-hint">Aşağıdaki sayıda YENİ (henüz bildirilmemiş) haber biriktiğinde e-posta gönderilir. Sınıf başına ayrı ayrı ayarlanır.</p>
+      <div class="esik-satirlari">
+        <div class="esik-satir">
+          <label for="esikCokOnemli">Çok Önemli</label>
+          <input type="number" id="esikCokOnemli" min="1" max="1000" step="1" inputmode="numeric">
+        </div>
+        <div class="esik-satir">
+          <label for="esikOnemli">Önemli</label>
+          <input type="number" id="esikOnemli" min="1" max="1000" step="1" inputmode="numeric">
+        </div>
+        <div class="esik-satir">
+          <label for="esikBakmayaDeger">Bakmaya Değer</label>
+          <input type="number" id="esikBakmayaDeger" min="1" max="1000" step="1" inputmode="numeric">
+        </div>
+      </div>
+      <button class="btn btn-outline btn-sm" id="esikKaydetBtn" type="button">Eşikleri Kaydet</button>
+    </div>
+
+    <div class="modal-section">
       <div class="modal-section-title" id="epostaBaslik">Bildirim E-postaları</div>
-      <p class="modal-hint">10 Çok Önemli, 25 Önemli ya da 50 Bakmaya Değer yeni haber biriktiğinde bu adreslere e-posta gönderilir (gece 00:00-06:00 arası gönderilmez, biriken haberler sabah 06:00'da toplu gelir; aynı adrese en fazla 90 dakikada bir mail gider).</p>
+      <p class="modal-hint">Eşik aşıldığında bu adreslere e-posta gönderilir (gece 00:00-06:00 arası gönderilmez, biriken haberler sabah 06:00'da toplu gelir; aynı adrese en fazla 90 dakikada bir mail gider).</p>
 
       <div class="key-row">
         <input type="email" id="epostaInput" placeholder="ornek@eposta.com" aria-labelledby="epostaBaslik" autocomplete="email" inputmode="email">

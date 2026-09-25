@@ -362,8 +362,16 @@ function filtreRozetGuncelle(rozetId, sayac) {
   }
 }
 
-/* ===================== Ayarlar modal (bildirim e-postaları) ===================== */
-let mevcutAyarlar = { alicilar: [] };
+/* ===================== Ayarlar modal (bildirim e-postaları + eşikler) ===================== */
+const ESIK_VARSAYILAN = { cok_onemli: 10, onemli: 25, bakmaya_deger: 50 };
+let mevcutAyarlar = { alicilar: [], esikler: { ...ESIK_VARSAYILAN } };
+
+function esikGirdileriniDoldur() {
+  const e = mevcutAyarlar.esikler || ESIK_VARSAYILAN;
+  $("esikCokOnemli").value = e.cok_onemli ?? ESIK_VARSAYILAN.cok_onemli;
+  $("esikOnemli").value = e.onemli ?? ESIK_VARSAYILAN.onemli;
+  $("esikBakmayaDeger").value = e.bakmaya_deger ?? ESIK_VARSAYILAN.bakmaya_deger;
+}
 
 function ayarDurumu(tur, mesaj, tekrarFn) {
   const kutu = $("ayarlarDurum");
@@ -440,8 +448,9 @@ async function ayarlarYukle() {
     const yanit = await resp.json();
     if (!yanit.ok) throw new Error("http");
 
-    mevcutAyarlar = { alicilar: yanit.ayarlar.alicilar || [] };
+    mevcutAyarlar = { alicilar: yanit.ayarlar.alicilar || [], esikler: yanit.ayarlar.esikler || { ...ESIK_VARSAYILAN } };
     aliciListesiCiz();
+    esikGirdileriniDoldur();
     ayarDurumu("", "");
   } catch (e) {
     $("epostaListesi").setAttribute("aria-busy", "false");
@@ -453,6 +462,7 @@ async function ayarlarYukle() {
 async function ayarlariKaydet(basariMesaji) {
   ayarDurumu("yukleniyor", "Kaydediliyor…");
   $("epostaEkleBtn").disabled = true;
+  $("esikKaydetBtn").disabled = true;
   try {
     const resp = await fetch("/api/ayarlar", {
       method: "POST",
@@ -463,6 +473,7 @@ async function ayarlariKaydet(basariMesaji) {
     if (yanit.ok) {
       mevcutAyarlar = yanit.ayarlar;
       aliciListesiCiz();
+      esikGirdileriniDoldur();
       ayarDurumu("ok", basariMesaji || "Kaydedildi.");
       if (basariMesaji) toast(basariMesaji, "ok");
     } else {
@@ -474,6 +485,7 @@ async function ayarlariKaydet(basariMesaji) {
     toast("Ayarlar kaydedilemedi.", "error");
   } finally {
     $("epostaEkleBtn").disabled = false;
+    $("esikKaydetBtn").disabled = false;
   }
 }
 function ayariTekrarKaydet(mesaj) { ayarlariKaydet(mesaj); }
@@ -504,6 +516,15 @@ function ayarlarBaslat() {
   $("epostaEkleBtn").addEventListener("click", epostaEkle);
   $("epostaInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") epostaEkle();
+  });
+
+  $("esikKaydetBtn").addEventListener("click", () => {
+    mevcutAyarlar.esikler = {
+      cok_onemli: parseInt($("esikCokOnemli").value, 10) || ESIK_VARSAYILAN.cok_onemli,
+      onemli: parseInt($("esikOnemli").value, 10) || ESIK_VARSAYILAN.onemli,
+      bakmaya_deger: parseInt($("esikBakmayaDeger").value, 10) || ESIK_VARSAYILAN.bakmaya_deger,
+    };
+    ayarlariKaydet("Eşikler kaydedildi.");
   });
 }
 
