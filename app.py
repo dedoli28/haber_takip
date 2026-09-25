@@ -82,13 +82,13 @@ from gemini_client import (
     KATEGORI_ETIKET,
     analiz_prompt_olustur,
     analiz_schema_olustur,
-    gemini_arama_ile_metin_iste,
     gemini_json_iste,
     gun_ozeti_prompt_olustur,
     gun_ozeti_schema_olustur,
     siniflandirma_prompt_olustur,
     siniflandirma_schema_olustur,
     sohbet_prompt_olustur,
+    sohbet_schema_olustur,
     tarama_analiz_prompt_olustur,
     tarama_analiz_schema_olustur,
 )
@@ -690,28 +690,19 @@ async def sohbet(request: Request):
 
     baglam = sohbet_baglami.baglam_olustur(mesajlar[-1]["metin"])
     prompt = sohbet_prompt_olustur(mesajlar, baglam)
+    schema = sohbet_schema_olustur()
     try:
         # Baglamli sohbet prompt'u (gun ozeti + haberler + varsa hisseler)
         # diger AI uclarindan daha buyuk olabilir; Gemini bunun icin 20 sn'yi
         # asabiliyor (canli gozlemlendi). 2 kisa deneme yerine TEK, daha uzun
         # bir deneme (Vercel'in 60 sn fonksiyon sinirinin altinda) daha
         # guvenilir: iki 20 sn'lik denemenin toplami zaten sinira yakindi.
-        # JSON sema KULLANILMAZ: google_search (grounding) tool'u ile
-        # responseSchema'yi ayni cagrida birlikte kullanmak bazi Gemini
-        # surumlerinde aramayi sessizce devre disi birakiyor (bkz.
-        # gemini_client.sohbet_prompt_olustur'daki not).
-        sonuc = gemini_arama_ile_metin_iste(prompt, api_key, GEMINI_MODEL, timeout=40, deneme_sayisi=1)
+        sonuc = gemini_json_iste(prompt, schema, api_key, GEMINI_MODEL, timeout=40, deneme_sayisi=1)
     except Exception as e:  # noqa: BLE001
         log.warning("sohbet basarisiz: %s: %s", type(e).__name__, e)
         return JSONResponse({"ok": False, "hata": str(e)}, status_code=502)
 
-    yanit = sonuc.get("metin", "")
-    kaynaklar = sonuc.get("kaynaklar") or []
-    if kaynaklar:
-        satirlar = "\n".join(f"- {k['baslik']}: {k['url']}" for k in kaynaklar)
-        yanit = f"{yanit}\n\nKaynak(lar):\n{satirlar}"
-
-    return {"ok": True, "yanit": yanit, "kaynaklar": kaynaklar}
+    return {"ok": True, "yanit": sonuc.get("yanit", "")}
 
 
 def _tarama_cron_calistir(evren: str) -> JSONResponse:
