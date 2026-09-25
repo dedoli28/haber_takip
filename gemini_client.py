@@ -415,6 +415,11 @@ def gemini_arama_ile_metin_iste(
             continue
 
         if resp.status_code == 429:
+            if "PerDay" in resp.text or "exceeded your current quota" in resp.text:
+                raise RuntimeError(
+                    f"Gemini ücretsiz günlük kota sınırı aşıldı ({model}). "
+                    "Kota genelde 24 saatte sıfırlanır; farklı bir API anahtarı/model de deneyebilirsiniz."
+                )
             son_hata = RuntimeError(f"Gemini istek limitine ulaşıldı (429): {resp.text[:200]}")
             bekle(deneme)
             continue

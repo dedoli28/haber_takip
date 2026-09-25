@@ -84,6 +84,14 @@ def test_arama_metin_429_sonra_tukenirse_hata(monkeypatch):
         gc.gemini_arama_ile_metin_iste("prompt", "key", "model", deneme_sayisi=2)
 
 
+def test_arama_metin_gunluk_kota_asildi_net_mesaj(monkeypatch):
+    monkeypatch.setattr(gc.requests, "post", lambda *a, **k: SahteYanit(
+        status_code=429, text='{"error": {"message": "You exceeded your current quota, ..."}}'
+    ))
+    with pytest.raises(RuntimeError, match="günlük kota"):
+        gc.gemini_arama_ile_metin_iste("prompt", "key", "model")
+
+
 def test_arama_metin_kalici_http_hatasi_hemen_firlar(monkeypatch):
     monkeypatch.setattr(gc.requests, "post", lambda *a, **k: SahteYanit(status_code=404, text="bulunamadi"))
     with pytest.raises(RuntimeError, match="404"):
