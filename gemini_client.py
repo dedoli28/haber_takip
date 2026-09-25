@@ -338,7 +338,12 @@ def sohbet_prompt_olustur(mesajlar: list[dict], baglam: str) -> str:
     'kullanici' mesajı yanıtlanacak son mesajdır. Gemini'nin çok turlu
     (multi-turn) 'contents' API'si yerine tek bir prompt metninde düz
     transkript kullanılır (diğer tüm Gemini çağrıları da bu projede aynı
-    tek-prompt deseniyle çalışır, bkz. gemini_json_iste)."""
+    tek-prompt deseniyle çalışır, bkz. gemini_json_iste). Bu prompt duz metin
+    icin tasarlanmistir (bkz. gemini_arama_ile_metin_iste) - JSON semasi
+    KULLANILMAZ, cunku google_search arac (grounding) ile responseSchema'yi
+    ayni cagrida birlikte kullanmak bazi Gemini surumlerinde aramayi sessizce
+    devre disi birakiyor ya da kaynak (grounding) verisini bos donduruyor
+    (resmi dokumantasyonda bilinen bir sorun)."""
     gecmis = "\n".join(
         f"{'Kullanıcı' if m['rol'] == 'kullanici' else 'Asistan'}: {m['metin']}" for m in mesajlar[:-1]
     )
@@ -346,12 +351,18 @@ def sohbet_prompt_olustur(mesajlar: list[dict], baglam: str) -> str:
     return f"""Sen "Piyasa Pusulası" adlı bir haber/piyasa takip platformunun
 Türkçe konuşan yapay zeka asistanısın. Kullanıcıyla doğal bir sohbet
 sürdürüyorsun ve aşağıda platformun GÜNCEL verisine (haberler, tarama
-sonuçları) erişimin var.
+sonuçları) erişimin var. Ayrıca Google araması yapabilme yeteneğin var.
 
 KURALLAR:
-- Yalnızca aşağıdaki platform verisine ve genel bilgine dayan; olmayan bir
-  haberi, fiyatı ya da oranı ASLA uydurma. Sorulan bir hisse/konu platform
-  verisinde yoksa bunu açıkça söyle.
+- ÖNCE platform verisine bak. Sorulan konu (haber, hisse, oran) aşağıdaki
+  platform verisinde varsa SADECE ona dayan, arama yapmana gerek yok.
+- Platform verisinde YETERLİ bilgi yoksa (ör. platformda geçmeyen bir şirket,
+  genel bir ekonomi/finans kavramı, güncel bir gelişme) Google araması
+  yaparak internetten araştır. İnternetten aldığın bir bilgiyi kullandığında,
+  yanıtının SONUNA hangi kaynağa dayandığını kısaca belirt (ör. "Kaynak:
+  [site adı]").
+- Ne platformda ne internette bulamadığın bir şeyi ASLA uydurma; bulamadığını
+  açıkça söyle.
 - Kısa ve öz yanıtla (genelde 2-5 cümle; gerekiyorsa kısa madde listesi).
 - Yatırım tavsiyesi verme; somut bir alım/satım önerisi istenirse bunun
   yatırım tavsiyesi olmadığını, eğitim/bilgi amaçlı olduğunu belirt.
@@ -362,12 +373,77 @@ KURALLAR:
 
 {f"Önceki konuşma:\n{gecmis}\n\n" if gecmis else ""}Kullanıcının son mesajı: {son_mesaj}
 
-Yukarıdaki son mesaja yanıt ver. Sadece "yanit" alanını içeren JSON dön."""
+Yukarıdaki son mesaja yanıt ver."""
 
 
-def sohbet_schema_olustur() -> dict:
-    return {
-        "type": "OBJECT",
-        "properties": {"yanit": {"type": "STRING"}},
-        "required": ["yanit"],
+def gemini_arama_ile_metin_iste(
+    prompt: str,
+    api_key: str,
+    model: str,
+    timeout: float = 20,
+    deneme_sayisi: int = 1,
+) -> dict:
+    """Google Arama destekli (grounding) düz metin ister. gemini_json_iste'den
+    farklı olarak JSON şema KULLANMAZ (bkz. sohbet_prompt_olustur'daki not).
+    Döner: {'metin': str, 'kaynaklar': [{'baslik': str, 'url': str}, ...]}.
+    Arama hiç yapılmadıysa ya da kaynak metadata'sı boş dönerse 'kaynaklar'
+    boş liste olur - bu bir hata SAYILMAZ (model platform verisiyle yeterli
+    görüp aramamış olabilir)."""
+    deneme_sayisi = max(1, int(deneme_sayisi))
+    body = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "tools": [{"google_search": {}}],
+        "generationConfig": {"temperature": 0.2},
     }
+    url = GEMINI_ENDPOINT.format(model=model)
+    son_hata: Exception | None = None
+
+    def gizle(metin: str) -> str:
+        return metin.replace(api_key, "***") if api_key else metin
+
+    def bekle(deneme: int, katsayi: float = 1) -> None:
+        if deneme < deneme_sayisi - 1:
+            time.sleep(katsayi * (deneme + 1))
+
+    GECICI_HATA_KODLARI = {500, 502, 503, 504}
+    for deneme in range(deneme_sayisi):
+        try:
+            resp = requests.post(url, params={"key": api_key}, json=body, timeout=timeout)
+        except Exception as e:  # noqa: BLE001
+            son_hata = RuntimeError(gizle(str(e)))
+            bekle(deneme)
+            continue
+
+        if resp.status_code == 429:
+            son_hata = RuntimeError(f"Gemini istek limitine ulaşıldı (429): {resp.text[:200]}")
+            bekle(deneme)
+            continue
+        if resp.status_code in GECICI_HATA_KODLARI:
+            son_hata = RuntimeError(f"Gemini geçici olarak yoğun/erişilemez ({resp.status_code}): {resp.text[:200]}")
+            bekle(deneme)
+            continue
+        if not resp.ok:
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+
+        try:
+            data = resp.json()
+            aday = data["candidates"][0]
+            parcalar = aday.get("content", {}).get("parts", []) or []
+            metin = "".join(p.get("text", "") for p in parcalar).strip()
+
+            kaynaklar: list[dict] = []
+            gorulen_url: set[str] = set()
+            grounding = aday.get("groundingMetadata") or {}
+            for chunk in grounding.get("groundingChunks") or []:
+                web = chunk.get("web") or {}
+                chunk_url = web.get("uri")
+                if chunk_url and chunk_url not in gorulen_url:
+                    gorulen_url.add(chunk_url)
+                    kaynaklar.append({"baslik": web.get("title") or chunk_url, "url": chunk_url})
+
+            return {"metin": metin, "kaynaklar": kaynaklar}
+        except Exception as e:  # noqa: BLE001
+            son_hata = RuntimeError(gizle(str(e)))
+            bekle(deneme, 1.5)
+
+    raise RuntimeError(str(son_hata) if son_hata else "Bilinmeyen hata")

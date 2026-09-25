@@ -209,11 +209,25 @@ Kaydet"e basarsa Kaydedilenler'e eklenir).
   hisseler (basit ticker eşleştirme — gerçek bir fonksiyon çağırma/tool-use
   akışı değildir). Veri yoksa model "bu konuda güncel veri yok" demesi için
   açıkça yönlendirilir; uydurma sayı/haber üretmemesi istenir.
+- **İnternet araması (fallback):** Platform verisi yetersizse model, Gemini'nin
+  **Google Arama (grounding)** aracını kendi kararıyla kullanarak internetten
+  araştırır; bulduğu kaynak(lar) yanıtın sonuna otomatik eklenir (bkz.
+  `gemini_client.gemini_arama_ile_metin_iste`). Bu çağrı **JSON şema
+  KULLANMAZ** (düz metin ister): `google_search` aracını `responseSchema` ile
+  aynı istekte kullanmak bazı Gemini sürümlerinde aramayı sessizce devre dışı
+  bırakıyor ya da kaynak (grounding) verisini boş döndürüyor (resmi
+  dokümantasyonda bilinen bir sorun) — bu yüzden diğer tüm Gemini
+  çağrılarından (`gemini_json_iste`) farklı, ayrı bir fonksiyondur. Google
+  Arama grounding'in kendi ücretsiz aylık kotası vardır, aşılırsa ayrıca
+  ücretlendirilir (bkz. Gemini API fiyatlandırması); bu yalnızca platform
+  verisi yetersiz kaldığında tetiklendiği için normal kullanımda nadir olması
+  beklenir.
 - **Uç nokta:** `POST /api/sohbet` — gövde `{"mesajlar": [{"rol": "kullanici"|
   "asistan", "metin": "..."}]}` (son öge `kullanici` olmalı), yanıt
-  `{"ok": true, "yanit": "..."}`. Herkese açık olduğu için IP başına 10
-  dakikada en fazla 20 mesajla sınırlıdır; geçmiş sunucuda son 20 mesaja,
-  her mesaj 2000 karaktere kırpılır.
+  `{"ok": true, "yanit": "...", "kaynaklar": [{"baslik", "url"}, ...]}`
+  (`kaynaklar` yalnızca gerçekten arama yapıldıysa dolu gelir). Herkese açık
+  olduğu için IP başına 10 dakikada en fazla 20 mesajla sınırlıdır; geçmiş
+  sunucuda son 20 mesaja, her mesaj 2000 karaktere kırpılır.
 
 ## Kaydedilenler: haber + hisse + sohbet
 

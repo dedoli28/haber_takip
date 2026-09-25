@@ -165,11 +165,11 @@ def test_sohbet_basarili_ve_gemini_baglami_gorur(istemci, monkeypatch, redis):
     monkeypatch.setattr(uygulama.sohbet_baglami, "baglam_olustur", lambda mesaj: "TEST_BAGLAM_ISARETI")
     yakalanan = {}
 
-    def sahte_gemini(prompt, schema, api_key, model, timeout=10, deneme_sayisi=2):
+    def sahte_gemini(prompt, api_key, model, timeout=10, deneme_sayisi=1):
         yakalanan["prompt"] = prompt
-        return {"yanit": "Merhaba, nasıl yardımcı olabilirim?"}
+        return {"metin": "Merhaba, nasıl yardımcı olabilirim?", "kaynaklar": []}
 
-    monkeypatch.setattr(uygulama, "gemini_json_iste", sahte_gemini)
+    monkeypatch.setattr(uygulama, "gemini_arama_ile_metin_iste", sahte_gemini)
     r = istemci.post("/api/sohbet", json={"mesajlar": [
         {"rol": "kullanici", "metin": "merhaba"},
         {"rol": "asistan", "metin": "selam!"},
@@ -177,9 +177,28 @@ def test_sohbet_basarili_ve_gemini_baglami_gorur(istemci, monkeypatch, redis):
     ]})
     j = r.json()
     assert r.status_code == 200 and j["ok"] and j["yanit"] == "Merhaba, nasıl yardımcı olabilirim?"
+    assert j["kaynaklar"] == []
     assert "TEST_BAGLAM_ISARETI" in yakalanan["prompt"]
     assert "bugün ne var?" in yakalanan["prompt"]
     assert "merhaba" in yakalanan["prompt"]  # gecmis de promptta
+
+
+def test_sohbet_kaynaklar_varsa_yanita_eklenir(istemci, monkeypatch, redis):
+    import app as uygulama
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test")
+    monkeypatch.setattr(uygulama.sohbet_baglami, "baglam_olustur", lambda mesaj: "")
+    kaynaklar = [{"baslik": "Örnek Haber Sitesi", "url": "https://ornek.com/haber"}]
+    monkeypatch.setattr(
+        uygulama, "gemini_arama_ile_metin_iste",
+        lambda *a, **k: {"metin": "İnternetten bulduğum bilgiye göre...", "kaynaklar": kaynaklar},
+    )
+    r = istemci.post("/api/sohbet", json={"mesajlar": [{"rol": "kullanici", "metin": "XYZ şirketi nedir?"}]})
+    j = r.json()
+    assert r.status_code == 200 and j["ok"]
+    assert "İnternetten bulduğum bilgiye göre..." in j["yanit"]
+    assert "ornek.com/haber" in j["yanit"] and "Örnek Haber Sitesi" in j["yanit"]
+    assert j["kaynaklar"] == kaynaklar
 
 
 def test_sohbet_uzun_gecmis_kirpilir(istemci, monkeypatch, redis):
@@ -189,11 +208,11 @@ def test_sohbet_uzun_gecmis_kirpilir(istemci, monkeypatch, redis):
     monkeypatch.setattr(uygulama.sohbet_baglami, "baglam_olustur", lambda mesaj: "")
     yakalanan = {}
 
-    def sahte_gemini(prompt, schema, api_key, model, timeout=10, deneme_sayisi=2):
+    def sahte_gemini(prompt, api_key, model, timeout=10, deneme_sayisi=1):
         yakalanan["prompt"] = prompt
-        return {"yanit": "ok"}
+        return {"metin": "ok", "kaynaklar": []}
 
-    monkeypatch.setattr(uygulama, "gemini_json_iste", sahte_gemini)
+    monkeypatch.setattr(uygulama, "gemini_arama_ile_metin_iste", sahte_gemini)
     # gercekci gecmis: kullanici/asistan almasik, EN SONDA kullanici (son mesaj yanitlanacak)
     cok_uzun_gecmis = [{"rol": "kullanici" if i % 2 == 0 else "asistan", "metin": f"mesaj-{i}"} for i in range(39)]
     r = istemci.post("/api/sohbet", json={"mesajlar": cok_uzun_gecmis})
@@ -207,7 +226,7 @@ def test_sohbet_rate_limit(istemci, monkeypatch, redis):
 
     monkeypatch.setenv("GEMINI_API_KEY", "test")
     monkeypatch.setattr(uygulama.sohbet_baglami, "baglam_olustur", lambda mesaj: "")
-    monkeypatch.setattr(uygulama, "gemini_json_iste", lambda *a, **k: {"yanit": "ok"})
+    monkeypatch.setattr(uygulama, "gemini_arama_ile_metin_iste", lambda *a, **k: {"metin": "ok", "kaynaklar": []})
     govde = {"mesajlar": [{"rol": "kullanici", "metin": "merhaba"}]}
     for _ in range(uygulama.SOHBET_AZAMI_ISTEK):
         assert istemci.post("/api/sohbet", json=govde).status_code == 200
